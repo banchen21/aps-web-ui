@@ -1,57 +1,35 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { Layers, LayoutDashboard, Activity, Settings, ClipboardCheck, Folder, Terminal, FileText } from 'lucide-react'
+import { apiService } from './services/api'
+import { translations, type Language } from './i18n/translations'
+import type { User, Workspace, Task, Agent, ApiResult } from './types'
+import Console from './pages/Console'
+import Monitor from './pages/Monitor'
+import Workspaces from './pages/Workspaces'
+import Tasks from './pages/Tasks'
+import Agents from './pages/Agents'
+import Debugger from './pages/Debugger'
 import './App.css'
 
-type ApiResult<T = unknown> = {
-  success: boolean
-  message?: string
-  data?: T
-  error?: { code: string; message: string }
-}
-
-type User = { id: string; username: string; email: string }
-
-type Workspace = {
-  id: string
-  name: string
-  description?: string
-  owner_id?: string
-  is_public?: boolean
-  created_at?: string
-  updated_at?: string
-}
-
-type Task = {
-  id: string
-  title: string
-  status: string
-  priority: string
-  workspace_id: string
-  created_at: string
-}
-
-type Agent = {
-  id: string
-  name: string
-  status: string
-  current_load: number
-  max_concurrent_tasks: number
-}
-
-type Section = 'overview' | 'workspaces' | 'tasks' | 'agents' | 'debugger'
+type Section = 'console' | 'workspaces' | 'tasks' | 'agents' | 'debugger' | 'monitor'
 
 function App() {
+  const [language, setLanguage] = useState<Language>((localStorage.getItem('aps_language') as Language) || 'zh')
+  const [theme, setTheme] = useState<'dark' | 'light'>((localStorage.getItem('aps_theme') as 'dark' | 'light') || 'dark')
   const [baseUrl, setBaseUrl] = useState(localStorage.getItem('aps_base_url') || 'http://127.0.0.1:8000')
   const [token, setToken] = useState(localStorage.getItem('aps_token') || '')
   const [notice, setNotice] = useState('Ready')
   const [booting, setBooting] = useState(true)
 
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
-  const [username, setUsername] = useState('alice_01')
+  const [username, setUsername] = useState('alice_999')
   const [email, setEmail] = useState('alice@example.com')
   const [password, setPassword] = useState('Abcd1234')
 
   const [user, setUser] = useState<User | null>(null)
-  const [section, setSection] = useState<Section>('overview')
+  const [section, setSection] = useState<Section>('console')
+  const [overviewExpanded, setOverviewExpanded] = useState<'workspaces' | 'tasks' | 'agents' | null>(null)
 
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [workspaceFilter, setWorkspaceFilter] = useState('')
@@ -79,6 +57,12 @@ function App() {
   const [reqBody, setReqBody] = useState('{}')
   const [reqResult, setReqResult] = useState('No request yet')
 
+  // System Monitor States
+  const [cpuUsageValue, setCpuUsageValue] = useState(42)
+  const [memoryUsageValue, setMemoryUsageValue] = useState(68)
+  const [diskUsageValue, setDiskUsageValue] = useState(35)
+  const [networkTrafficValue, setNetworkTrafficValue] = useState(127)
+
   const filteredWorkspaces = useMemo(() => {
     const keyword = workspaceFilter.trim().toLowerCase()
     if (!keyword) return workspaces
@@ -95,95 +79,105 @@ function App() {
     localStorage.setItem('aps_token', token)
   }, [token])
 
-  const callApi = async <T,>(path: string, method: string, body?: unknown): Promise<ApiResult<T>> => {
-    const headers: HeadersInit = {}
-    if (token) headers.Authorization = `Bearer ${token}`
-    if (method !== 'GET' && method !== 'DELETE') headers['Content-Type'] = 'application/json'
+  useEffect(() => {
+    localStorage.setItem('aps_language', language)
+  }, [language])
 
-    const res = await fetch(`${baseUrl}${path}`, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    })
-    const data = (await res.json().catch(() => ({
-      success: false,
-      error: { code: 'PARSE_ERROR', message: `Unable to parse response (HTTP ${res.status})` },
-    }))) as ApiResult<T>
+  useEffect(() => {
+    localStorage.setItem('aps_theme', theme)
+    document.documentElement.setAttribute('data-theme', theme)
+  }, [theme])
 
-    if (!res.ok || !data.success) {
-      throw new Error(data.error?.message || `HTTP ${res.status}`)
-    }
-    return data
+  const t = (key: string) => {
+    const translationKey = key as keyof typeof translations.zh
+    return translations[language][translationKey] || key
   }
 
+  const toggleLanguage = () => {
+    setLanguage(prev => prev === 'zh' ? 'en' : 'zh')
+  }
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark')
+  }
+
+  useEffect(() => {
+    apiService.setBaseUrl(baseUrl)
+    apiService.setToken(token)
+  }, [baseUrl, token])
+
   const loadMe = async () => {
-    const res = await callApi<User>('/auth/me', 'GET')
-    setUser(res.data || null)
+    const res = await apiService.getMe()
+    if (res.success && res.data) setUser(res.data)
   }
 
   const loadWorkspaces = async () => {
-    const res = await callApi<Workspace[]>('/workspaces?page=1&page_size=200', 'GET')
-    const list = res.data || []
-    setWorkspaces(list)
-    if (!selectedWorkspaceId && list[0]?.id) {
-      setSelectedWorkspaceId(list[0].id)
-      void loadWorkspaceDetail(list[0].id)
-    }
+    const res = await apiService.getWorkspaces()
+    if (res.success && res.data) setWorkspaces(res.data)
   }
 
   const loadWorkspaceDetail = async (workspaceId: string) => {
-    if (!workspaceId) return
-    const res = await callApi<Workspace>(`/workspaces/${workspaceId}`, 'GET')
-    const detail = res.data || null
-    setWorkspaceDetail(detail)
-    if (detail) {
-      setEditingWorkspaceName(detail.name || '')
-      setEditingWorkspaceDesc(detail.description || '')
-      setEditingWorkspaceIsPublic(Boolean(detail.is_public))
+    const res = await apiService.getWorkspace(workspaceId)
+    if (res.success && res.data) {
+      setWorkspaceDetail(res.data)
+      setEditingWorkspaceName(res.data.name)
+      setEditingWorkspaceDesc(res.data.description || '')
+      setEditingWorkspaceIsPublic(res.data.is_public || false)
+      setNotice(language === 'zh' ? `正在编辑: ${res.data.name}` : `Editing: ${res.data.name}`)
+      // 滚动到编辑表单
+      setTimeout(() => {
+        const editForm = document.querySelector('form[class="panel"]:last-of-type')
+        if (editForm) {
+          editForm.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+      }, 100)
+    } else {
+      setNotice(res.error || (language === 'zh' ? '加载工作空间详情失败' : 'Failed to load workspace details'))
     }
   }
 
   useEffect(() => {
     const init = async () => {
-      if (!token) {
-        setBooting(false)
-        return
-      }
-      try {
+      setBooting(true)
+      if (token) {
         await loadMe()
-        await Promise.all([loadWorkspaces(), loadAgents(), loadAgentStats()])
-      } catch {
-        setToken('')
-        setUser(null)
-      } finally {
-        setBooting(false)
+        await loadWorkspaces()
       }
+      setBooting(false)
     }
-    void init()
+    init()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [token])
+
+  useEffect(() => {
+    if (token && section === 'agents') {
+      loadAgents()
+      loadAgentStats()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section, token])
 
   const register = async (e: FormEvent) => {
     e.preventDefault()
-    try {
-      await callApi('/auth/register', 'POST', { username, email, password })
-      setNotice('Register succeeded. Please login.')
-      setAuthMode('login')
-    } catch (err) {
-      setNotice(`Register failed: ${(err as Error).message}`)
+    const res = await apiService.register(username, email, password)
+    if (res.success && res.data) {
+      setToken(res.data.access_token || '')
+      setUser(res.data.user || null)
+      setNotice('Registered successfully')
+    } else {
+      setNotice(res.error || 'Registration failed')
     }
   }
 
   const login = async (e: FormEvent) => {
     e.preventDefault()
-    try {
-      const res = await callApi<{ access_token: string; user: User }>('/auth/login', 'POST', { username, password })
-      setToken(res.data?.access_token || '')
-      setUser(res.data?.user || null)
-      setNotice('Login successful')
-      await Promise.all([loadWorkspaces(), loadAgents(), loadAgentStats()])
-    } catch (err) {
-      setNotice(`Login failed: ${(err as Error).message}`)
+    const res = await apiService.login(username, password)
+    if (res.success && res.data) {
+      setToken(res.data.access_token || '')
+      setUser(res.data.user || null)
+      setNotice('Logged in successfully')
+    } else {
+      setNotice(res.error || 'Login failed')
     }
   }
 
@@ -191,206 +185,163 @@ function App() {
     setToken('')
     setUser(null)
     setWorkspaces([])
-    setWorkspaceDetail(null)
     setTasks([])
     setAgents([])
-    setAgentStats(null)
     setNotice('Logged out')
   }
 
   const createWorkspace = async (e: FormEvent) => {
     e.preventDefault()
-    try {
-      const res = await callApi<Workspace>('/workspaces', 'POST', {
-        name: workspaceName,
-        description: workspaceDesc,
-        is_public: workspaceIsPublic,
-        context: {},
-        metadata: {},
-      })
-      const id = res.data?.id || ''
-      if (id) {
-        setSelectedWorkspaceId(id)
-        await loadWorkspaceDetail(id)
-      }
+    const res = await apiService.createWorkspace(workspaceName, workspaceDesc, workspaceIsPublic)
+    if (res.success) {
       setNotice('Workspace created')
       await loadWorkspaces()
-    } catch (err) {
-      setNotice(`Create workspace failed: ${(err as Error).message}`)
+      setWorkspaceName('')
+      setWorkspaceDesc('')
+      setWorkspaceIsPublic(false)
+    } else {
+      setNotice(res.error || 'Failed to create workspace')
     }
   }
 
   const updateWorkspace = async (e: FormEvent) => {
     e.preventDefault()
-    if (!selectedWorkspaceId) {
-      setNotice('Select workspace first')
-      return
-    }
-    try {
-      await callApi(`/workspaces/${selectedWorkspaceId}`, 'PUT', {
-        name: editingWorkspaceName,
-        description: editingWorkspaceDesc,
-        is_public: editingWorkspaceIsPublic,
-      })
+    if (!workspaceDetail) return
+    const res = await apiService.updateWorkspace(
+      workspaceDetail.id,
+      editingWorkspaceName,
+      editingWorkspaceDesc,
+      editingWorkspaceIsPublic
+    )
+    if (res.success) {
       setNotice('Workspace updated')
-      await Promise.all([loadWorkspaces(), loadWorkspaceDetail(selectedWorkspaceId)])
-    } catch (err) {
-      setNotice(`Update workspace failed: ${(err as Error).message}`)
+      await loadWorkspaces()
+      await loadWorkspaceDetail(workspaceDetail.id)
+    } else {
+      setNotice(res.error || 'Failed to update workspace')
     }
   }
 
   const deleteWorkspace = async () => {
-    if (!selectedWorkspaceId) {
-      setNotice('Select workspace first')
-      return
-    }
-    const ok = window.confirm('Delete this workspace? This action cannot be undone.')
-    if (!ok) return
-    try {
-      await callApi(`/workspaces/${selectedWorkspaceId}`, 'DELETE')
-      setNotice('Workspace deleted')
+    if (!workspaceDetail) return
+    const confirmMessage = language === 'zh'
+      ? `确定要删除工作空间 "${workspaceDetail.name}" 吗？此操作无法撤销。`
+      : `Are you sure you want to delete workspace "${workspaceDetail.name}"? This action cannot be undone.`
+    
+    if (!window.confirm(confirmMessage)) return
+    
+    const res = await apiService.deleteWorkspace(workspaceDetail.id)
+    if (res.success) {
+      setNotice(language === 'zh' ? '工作空间已删除' : 'Workspace deleted')
       setWorkspaceDetail(null)
       setSelectedWorkspaceId('')
       await loadWorkspaces()
-    } catch (err) {
-      setNotice(`Delete workspace failed: ${(err as Error).message}`)
+    } else {
+      setNotice(res.error || (language === 'zh' ? '删除工作空间失败' : 'Failed to delete workspace'))
     }
   }
 
   const loadTasks = async () => {
-    if (!selectedWorkspaceId) {
-      setNotice('Select workspace first')
-      return
-    }
-    const res = await callApi<Task[]>(
-      `/tasks?workspace_id=${selectedWorkspaceId}&page=1&page_size=100`,
-      'GET',
-    )
-    setTasks(res.data || [])
+    const res = await apiService.getTasks()
+    if (res.success && res.data) setTasks(res.data)
   }
 
   const createTask = async (e: FormEvent) => {
     e.preventDefault()
-    if (!selectedWorkspaceId) {
-      setNotice('Select workspace first')
-      return
-    }
-    try {
-      await callApi('/tasks', 'POST', {
-        title: taskTitle,
-        description: taskDesc,
-        priority: taskPriority,
-        workspace_id: selectedWorkspaceId,
-        requirements: {},
-        context: {},
-        metadata: {},
-      })
+    const res = await apiService.createTask(taskTitle, taskDesc, taskPriority, selectedWorkspaceId)
+    if (res.success) {
       setNotice('Task created')
       await loadTasks()
-    } catch (err) {
-      setNotice(`Create task failed: ${(err as Error).message}`)
+      setTaskTitle('')
+      setTaskDesc('')
+    } else {
+      setNotice(res.error || 'Failed to create task')
     }
   }
 
   const loadAgents = async () => {
-    const res = await callApi<Agent[]>('/agents', 'GET')
-    setAgents(res.data || [])
+    const res = await apiService.getAgents()
+    console.log('loadAgents response:', res)
+    if (res.success && res.data) {
+      console.log('Setting agents:', res.data)
+      setAgents(res.data)
+    } else {
+      console.log('Failed to load agents:', res.error)
+      setNotice(res.error || 'Failed to load agents')
+    }
   }
 
   const loadAgentStats = async () => {
-    const res = await callApi<Record<string, unknown>>('/agents/stats', 'GET')
-    setAgentStats(res.data || null)
+    const res = await apiService.getAgentStats()
+    if (res.success && res.data) setAgentStats(res.data as Record<string, unknown>)
   }
 
   const registerAgent = async (e: FormEvent) => {
     e.preventDefault()
-    try {
-      await callApi('/agents', 'POST', {
-        name: agentName,
-        description: 'Created from APS Web UI',
-        capabilities: [{ name: agentCapability, description: 'capability', version: '1.0', parameters: {} }],
-        endpoints: {
-          task_execution: 'http://127.0.0.1:9001/run',
-          health_check: 'http://127.0.0.1:9001/health',
-          status_update: null,
-        },
-        limits: {
-          max_concurrent_tasks: 2,
-          max_execution_time: 600,
-          max_memory_usage: null,
-          rate_limit_per_minute: 60,
-        },
-        metadata: {},
-      })
+    const res = await apiService.registerAgent(agentName, [agentCapability])
+    if (res.success) {
       setNotice('Agent registered')
-      await Promise.all([loadAgents(), loadAgentStats()])
-    } catch (err) {
-      setNotice(`Register agent failed: ${(err as Error).message}`)
+      await loadAgents()
+      setAgentName(`agent-${Date.now().toString().slice(-6)}`)
+    } else {
+      setNotice(res.error || 'Failed to register agent')
     }
   }
 
   const sendRawRequest = async (e: FormEvent) => {
     e.preventDefault()
     try {
-      const headers: HeadersInit = {}
-      if (token) headers.Authorization = `Bearer ${token}`
-      if (reqMethod !== 'GET' && reqMethod !== 'DELETE') headers['Content-Type'] = 'application/json'
-      const response = await fetch(`${baseUrl}${reqPath}`, {
+      const url = `${baseUrl}${reqPath}`
+      const options: RequestInit = {
         method: reqMethod,
-        headers,
-        body: reqMethod === 'GET' || reqMethod === 'DELETE' ? undefined : reqBody,
-      })
-      const text = await response.text()
-      setReqResult(`HTTP ${response.status} ${response.statusText}\n\n${text}`)
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { Authorization: `Bearer ${token}` }),
+        },
+      }
+      if (reqMethod !== 'GET' && reqBody.trim()) {
+        options.body = reqBody
+      }
+      const response = await fetch(url, options)
+      const data = await response.json()
+      setReqResult(JSON.stringify(data, null, 2))
     } catch (err) {
-      setReqResult(`Request failed: ${(err as Error).message}`)
+      setReqResult(`Error: ${err}`)
     }
   }
 
   if (booting) {
-    return (
-      <div className="auth-wrap">
-        <div className="auth-card">
-          <h1>Agent Parallel System</h1>
-          <p>Loading session...</p>
-        </div>
-      </div>
-    )
+    return <div className="loading">Loading...</div>
   }
 
-  if (!token || !user) {
+  if (!token) {
     return (
-      <div className="auth-wrap">
+      <div className="auth-container">
         <form className="auth-card" onSubmit={authMode === 'login' ? login : register}>
-          <h1>Agent Parallel System</h1>
-          <p className="sub">{authMode === 'login' ? 'Sign in to continue' : 'Create your account'}</p>
+          <h2>{authMode === 'login' ? t('login') : t('registerBtn')}</h2>
+          <label>
+            {t('username')}
+            <input value={username} onChange={(e) => setUsername(e.target.value)} />
+          </label>
+          <label>
+            {t('password')}
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </label>
+          {authMode === 'register' && (
+            <label>
+              {t('email')}
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            </label>
+          )}
           <label>
             Base URL
             <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
           </label>
-          <label>
-            Username
-            <input value={username} onChange={(e) => setUsername(e.target.value)} />
-          </label>
-          {authMode === 'register' && (
-            <label>
-              Email
-              <input value={email} onChange={(e) => setEmail(e.target.value)} />
-            </label>
-          )}
-          <label>
-            Password
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          </label>
-          <button type="submit">{authMode === 'login' ? 'Login' : 'Register'}</button>
-          <button
-            type="button"
-            className="ghost"
-            onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
-          >
-            {authMode === 'login' ? 'No account? Register' : 'Have account? Login'}
+          <button type="submit">{authMode === 'login' ? t('login') : t('registerBtn')}</button>
+          <button type="button" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>
+            {authMode === 'login' ? t('switchToRegister') : t('switchToLogin')}
           </button>
-          <div className="auth-note">{notice}</div>
+          <div className="notice">{notice}</div>
         </form>
       </div>
     )
@@ -400,201 +351,179 @@ function App() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <h2>APS</h2>
-          <span>Control Center</span>
+          <Layers className="brand-icon" size={28} strokeWidth={2} />
+          <span className="brand-text">{t('systemName')}</span>
         </div>
         <nav>
-          <button className={section === 'overview' ? 'active' : ''} onClick={() => setSection('overview')}>Overview</button>
-          <button className={section === 'workspaces' ? 'active' : ''} onClick={() => setSection('workspaces')}>Workspaces</button>
-          <button className={section === 'tasks' ? 'active' : ''} onClick={() => setSection('tasks')}>Tasks</button>
-          <button className={section === 'agents' ? 'active' : ''} onClick={() => setSection('agents')}>Agents</button>
-          <button className={section === 'debugger' ? 'active' : ''} onClick={() => setSection('debugger')}>API Debugger</button>
+          <div className="nav-group">
+            <div className="nav-category">{t('overview')}</div>
+            <button
+              className={section === 'console' ? 'active' : ''}
+              onClick={() => setSection('console')}
+            >
+              <LayoutDashboard size={20} strokeWidth={2} />
+              {t('console')}
+            </button>
+            <button
+              className={section === 'monitor' ? 'active' : ''}
+              onClick={() => setSection('monitor')}
+            >
+              <Activity size={20} strokeWidth={2} />
+              {t('monitor')}
+            </button>
+          </div>
+
+          <div className="nav-group">
+            <div className="nav-category">{t('management')}</div>
+            <button
+              className={section === 'workspaces' ? 'active' : ''}
+              onClick={() => setSection('workspaces')}
+            >
+              <Folder size={20} strokeWidth={2} />
+              {t('workspaces')}
+            </button>
+            <button
+              className={section === 'tasks' ? 'active' : ''}
+              onClick={() => setSection('tasks')}
+            >
+              <ClipboardCheck size={20} strokeWidth={2} />
+              {t('tasks')}
+            </button>
+            <button
+              className={section === 'agents' ? 'active' : ''}
+              onClick={() => setSection('agents')}
+            >
+              <FileText size={20} strokeWidth={2} />
+              {t('agents')}
+            </button>
+          </div>
+
+          <div className="nav-group">
+            <div className="nav-category">{t('tools')}</div>
+            <button
+              className={section === 'debugger' ? 'active' : ''}
+              onClick={() => setSection('debugger')}
+            >
+              <Terminal size={20} strokeWidth={2} />
+              {t('debugger')}
+            </button>
+          </div>
         </nav>
+        <div className="sidebar-footer">
+          <button className="sidebar-lang-toggle" onClick={toggleLanguage}>
+            {language === 'zh' ? '中文' : 'EN'} / {language === 'zh' ? 'EN' : '中文'}
+          </button>
+        </div>
       </aside>
 
       <main className="main">
         <header className="topbar">
-          <div>
-            <h1>{section[0].toUpperCase() + section.slice(1)}</h1>
-            <p>{notice}</p>
+          <div className="topbar-left">
+            <h2>{t(section)}</h2>
           </div>
-          <div className="top-actions">
-            <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
-            <span>{user.username}</span>
-            <button className="ghost" onClick={logout}>Logout</button>
+          <div className="topbar-right">
+            <button className="icon-btn" onClick={toggleTheme} title="Toggle Theme">
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
+            {user && <span className="user-name">{user.username}</span>}
+            <button className="logout-btn" onClick={logout}>
+              {t('logout')}
+            </button>
           </div>
         </header>
 
         <section className="content">
-          {section === 'overview' && (
-            <div className="grid cards3">
-              <article className="panel">
-                <h3>Workspaces</h3>
-                <strong>{workspaces.length}</strong>
-                <button onClick={() => void loadWorkspaces()}>Refresh</button>
-              </article>
-              <article className="panel">
-                <h3>Tasks</h3>
-                <strong>{tasks.length}</strong>
-                <button onClick={() => void loadTasks()}>Refresh</button>
-              </article>
-              <article className="panel">
-                <h3>Agents</h3>
-                <strong>{agents.length}</strong>
-                <button onClick={() => void loadAgents()}>Refresh</button>
-              </article>
-              <article className="panel span-3">
-                <h3>Workspace Dashboard (All)</h3>
-                <input
-                  placeholder="Search workspace by name/description"
-                  value={workspaceFilter}
-                  onChange={(e) => setWorkspaceFilter(e.target.value)}
-                />
-                <pre>{JSON.stringify(filteredWorkspaces, null, 2)}</pre>
-              </article>
-            </div>
+          {section === 'console' && <Console language={language} t={t} />}
+          
+          {section === 'monitor' && (
+            <Monitor
+              language={language}
+              t={t}
+              cpuUsage={cpuUsageValue}
+              memoryUsage={memoryUsageValue}
+              diskUsage={diskUsageValue}
+              networkTraffic={networkTrafficValue}
+            />
           )}
-
+          
           {section === 'workspaces' && (
-            <div className="grid two">
-              <form className="panel" onSubmit={createWorkspace}>
-                <h3>Create Workspace</h3>
-                <input value={workspaceName} onChange={(e) => setWorkspaceName(e.target.value)} placeholder="workspace name" />
-                <input value={workspaceDesc} onChange={(e) => setWorkspaceDesc(e.target.value)} placeholder="description" />
-                <label className="row">
-                  <input
-                    type="checkbox"
-                    checked={workspaceIsPublic}
-                    onChange={(e) => setWorkspaceIsPublic(e.target.checked)}
-                  />
-                  is_public
-                </label>
-                <div className="row">
-                  <button type="submit">Create</button>
-                  <button type="button" className="ghost" onClick={() => void loadWorkspaces()}>Reload</button>
-                </div>
-              </form>
-
-              <div className="panel">
-                <h3>Query Workspace</h3>
-                <select
-                  value={selectedWorkspaceId}
-                  onChange={(e) => {
-                    const id = e.target.value
-                    setSelectedWorkspaceId(id)
-                    void loadWorkspaceDetail(id)
-                  }}
-                >
-                  <option value="">Select workspace</option>
-                  {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                </select>
-                <input
-                  placeholder="Filter list"
-                  value={workspaceFilter}
-                  onChange={(e) => setWorkspaceFilter(e.target.value)}
-                />
-                <pre>{JSON.stringify(filteredWorkspaces, null, 2)}</pre>
-              </div>
-
-              <form className="panel span-2" onSubmit={updateWorkspace}>
-                <h3>Update / Delete Workspace</h3>
-                <input
-                  value={editingWorkspaceName}
-                  onChange={(e) => setEditingWorkspaceName(e.target.value)}
-                  placeholder="new name"
-                />
-                <input
-                  value={editingWorkspaceDesc}
-                  onChange={(e) => setEditingWorkspaceDesc(e.target.value)}
-                  placeholder="new description"
-                />
-                <label className="row">
-                  <input
-                    type="checkbox"
-                    checked={editingWorkspaceIsPublic}
-                    onChange={(e) => setEditingWorkspaceIsPublic(e.target.checked)}
-                  />
-                  is_public
-                </label>
-                <div className="row">
-                  <button type="submit">Update</button>
-                  <button type="button" className="danger" onClick={deleteWorkspace}>Delete</button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={() => void loadWorkspaceDetail(selectedWorkspaceId)}
-                  >
-                    Query Detail
-                  </button>
-                </div>
-                <pre>{JSON.stringify(workspaceDetail, null, 2)}</pre>
-              </form>
-            </div>
+            <Workspaces
+              language={language}
+              t={t}
+              workspaces={workspaces}
+              filteredWorkspaces={filteredWorkspaces}
+              workspaceFilter={workspaceFilter}
+              setWorkspaceFilter={setWorkspaceFilter}
+              workspaceName={workspaceName}
+              setWorkspaceName={setWorkspaceName}
+              workspaceDesc={workspaceDesc}
+              setWorkspaceDesc={setWorkspaceDesc}
+              workspaceIsPublic={workspaceIsPublic}
+              setWorkspaceIsPublic={setWorkspaceIsPublic}
+              selectedWorkspaceId={selectedWorkspaceId}
+              setSelectedWorkspaceId={setSelectedWorkspaceId}
+              createWorkspace={createWorkspace}
+              workspaceDetail={workspaceDetail}
+              loadWorkspaceDetail={loadWorkspaceDetail}
+              loadWorkspaces={loadWorkspaces}
+              editingWorkspaceName={editingWorkspaceName}
+              setEditingWorkspaceName={setEditingWorkspaceName}
+              editingWorkspaceDesc={editingWorkspaceDesc}
+              setEditingWorkspaceDesc={setEditingWorkspaceDesc}
+              editingWorkspaceIsPublic={editingWorkspaceIsPublic}
+              setEditingWorkspaceIsPublic={setEditingWorkspaceIsPublic}
+              updateWorkspace={updateWorkspace}
+              deleteWorkspace={deleteWorkspace}
+              setSection={(s) => setSection(s as Section)}
+            />
           )}
-
+          
           {section === 'tasks' && (
-            <div className="grid two">
-              <form className="panel" onSubmit={createTask}>
-                <h3>Create Task</h3>
-                <input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="task title" />
-                <input value={taskDesc} onChange={(e) => setTaskDesc(e.target.value)} placeholder="description" />
-                <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)}>
-                  <option value="low">low</option>
-                  <option value="medium">medium</option>
-                  <option value="high">high</option>
-                  <option value="urgent">urgent</option>
-                </select>
-                <select value={selectedWorkspaceId} onChange={(e) => setSelectedWorkspaceId(e.target.value)}>
-                  <option value="">Select workspace</option>
-                  {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                </select>
-                <div className="row">
-                  <button type="submit">Create</button>
-                  <button type="button" className="ghost" onClick={() => void loadTasks()}>Reload</button>
-                </div>
-              </form>
-              <div className="panel">
-                <h3>Task List</h3>
-                <pre>{JSON.stringify(tasks, null, 2)}</pre>
-              </div>
-            </div>
+            <Tasks
+              language={language}
+              t={t}
+              tasks={tasks}
+              loadTasks={loadTasks}
+              taskTitle={taskTitle}
+              setTaskTitle={setTaskTitle}
+              taskDesc={taskDesc}
+              setTaskDesc={setTaskDesc}
+              taskPriority={taskPriority}
+              setTaskPriority={setTaskPriority}
+              selectedWorkspaceId={selectedWorkspaceId}
+              setSelectedWorkspaceId={setSelectedWorkspaceId}
+              workspaces={workspaces}
+              createTask={createTask}
+            />
           )}
-
+          
           {section === 'agents' && (
-            <div className="grid two">
-              <form className="panel" onSubmit={registerAgent}>
-                <h3>Register Agent</h3>
-                <input value={agentName} onChange={(e) => setAgentName(e.target.value)} placeholder="agent name" />
-                <input value={agentCapability} onChange={(e) => setAgentCapability(e.target.value)} placeholder="capability" />
-                <div className="row">
-                  <button type="submit">Register</button>
-                  <button type="button" className="ghost" onClick={() => void loadAgents()}>Reload List</button>
-                  <button type="button" className="ghost" onClick={() => void loadAgentStats()}>Reload Stats</button>
-                </div>
-              </form>
-              <div className="panel">
-                <h3>Agents</h3>
-                <pre>{JSON.stringify({ agents, stats: agentStats }, null, 2)}</pre>
-              </div>
-            </div>
+            <Agents
+              t={t}
+              agents={agents}
+              loadAgents={loadAgents}
+              agentStats={agentStats}
+              loadAgentStats={loadAgentStats}
+              agentName={agentName}
+              setAgentName={setAgentName}
+              agentCapability={agentCapability}
+              setAgentCapability={setAgentCapability}
+              registerAgent={registerAgent}
+            />
           )}
-
+          
           {section === 'debugger' && (
-            <form className="panel" onSubmit={sendRawRequest}>
-              <h3>Request Debugger</h3>
-              <div className="row">
-                <select value={reqMethod} onChange={(e) => setReqMethod(e.target.value)}>
-                  <option>GET</option>
-                  <option>POST</option>
-                  <option>PUT</option>
-                  <option>DELETE</option>
-                </select>
-                <input value={reqPath} onChange={(e) => setReqPath(e.target.value)} placeholder="/health" />
-              </div>
-              <textarea value={reqBody} onChange={(e) => setReqBody(e.target.value)} />
-              <button type="submit">Send</button>
-              <pre>{reqResult}</pre>
-            </form>
+            <Debugger
+              t={t}
+              reqMethod={reqMethod}
+              setReqMethod={setReqMethod}
+              reqPath={reqPath}
+              setReqPath={setReqPath}
+              reqBody={reqBody}
+              setReqBody={setReqBody}
+              reqResult={reqResult}
+              sendRawRequest={sendRawRequest}
+            />
           )}
         </section>
       </main>
