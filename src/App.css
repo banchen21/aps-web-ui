@@ -1,0 +1,271 @@
+.auth-wrap {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.auth-card {
+  width: min(460px, 100%);
+  border: 1px solid #d8e2dc;
+  background: #ffffffee;
+  border-radius: 16px;
+  padding: 20px;
+  display: grid;
+  gap: 12px;
+  box-shadow: 0 18px 36px rgba(13, 22, 18, 0.12);
+}
+
+.auth-card h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.sub {
+  margin: 0;
+  color: #4f655a;
+}
+
+.auth-card label {
+  font-size: 12px;
+  color: #4b6157;
+  display: grid;
+  gap: 6px;
+}
+
+.auth-note {
+  font-family: "IBM Plex Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: #f3faf6;
+  border: 1px solid #d7e5dc;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 260px 1fr;
+}
+
+.sidebar {
+  background:
+    linear-gradient(190deg, #0d5b53 0%, #113e57 45%, #122a3c 100%);
+  color: #eafaf6;
+  padding: 20px 14px;
+  display: grid;
+  align-content: start;
+  gap: 20px;
+}
+
+.brand h2 {
+  margin: 0;
+  font-size: 30px;
+  letter-spacing: 0.03em;
+}
+
+.brand span {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.sidebar nav {
+  display: grid;
+  gap: 8px;
+}
+
+.sidebar nav button {
+  border: 0;
+  border-radius: 10px;
+  text-align: left;
+  background: transparent;
+  color: #d8f3ec;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+.sidebar nav button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.sidebar nav button.active {
+  background: #d2fff17d;
+  color: #08392e;
+  font-weight: 700;
+}
+
+.main {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: #f4f7f3;
+}
+
+.topbar {
+  padding: 14px 16px;
+  border-bottom: 1px solid #d4dfd8;
+  background: #ffffffde;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.topbar p {
+  margin: 4px 0 0;
+  font-family: "IBM Plex Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: #4f665b;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.top-actions span {
+  background: #eef8f3;
+  border: 1px solid #cde2d8;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.content {
+  padding: 14px;
+}
+
+.grid {
+  display: grid;
+  gap: 12px;
+}
+
+.grid.two {
+  grid-template-columns: 1fr 1fr;
+}
+
+.cards3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.span-3 {
+  grid-column: 1 / -1;
+}
+
+.span-2 {
+  grid-column: 1 / -1;
+}
+
+.panel {
+  background: #ffffffeb;
+  border: 1px solid #d8e2dc;
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.panel h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.panel strong {
+  font-size: 24px;
+  color: #0a6b57;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+input,
+select,
+textarea,
+button {
+  border-radius: 9px;
+  border: 1px solid #c7d3cd;
+  padding: 9px 10px;
+  font-size: 13px;
+}
+
+input,
+select,
+textarea {
+  background: #fff;
+  color: #182b23;
+}
+
+textarea {
+  min-height: 120px;
+  resize: vertical;
+  font-family: "IBM Plex Mono", Menlo, Consolas, monospace;
+}
+
+button {
+  border: 0;
+  background: #0f766e;
+  color: #f5fffd;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button.ghost {
+  background: #e8f1ec;
+  color: #21463a;
+}
+
+button.danger {
+  background: #b91c1c;
+  color: #fff;
+}
+
+input[type="checkbox"] {
+  width: auto;
+}
+
+pre {
+  margin: 0;
+  max-height: 300px;
+  overflow: auto;
+  background: #f7fbf9;
+  border: 1px solid #dfe9e4;
+  border-radius: 9px;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "IBM Plex Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+@media (max-width: 1080px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    padding: 10px;
+    gap: 10px;
+  }
+  .sidebar nav {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 860px) {
+  .grid.two,
+  .cards3 {
+    grid-template-columns: 1fr;
+  }
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
