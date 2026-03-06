@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Shield, Eye, EyeOff, Loader2, AlertCircle, CheckCircle } from 'lucide-react'
 import { authService } from '../services/auth'
+import { useToast } from '../contexts/ToastContext'
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const { showSuccess, showError } = useToast()
   const [isLogin, setIsLogin] = useState(true)
   
   // Login state
@@ -24,8 +26,6 @@ export default function LoginPage() {
   
   // Common state
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
 
   useEffect(() => {
     // 清理定时器
@@ -36,8 +36,6 @@ export default function LoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
-    setSuccess('')
     setLoading(true)
 
     try {
@@ -55,7 +53,7 @@ export default function LoginPage() {
         localStorage.setItem('aps_refresh_token', authData.refresh_token)
       }
       localStorage.setItem('aps_user', JSON.stringify(authData.user || {}))
-      setSuccess('登录成功，正在跳转...')
+      showSuccess('登录成功，正在跳转...')
       
       // 设置自动 Token 刷新
       authService.setupAutoRefresh()
@@ -64,7 +62,7 @@ export default function LoginPage() {
         navigate('/dashboard')
       }, 500)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '登录失败，请检查网络连接')
+      showError(err instanceof Error ? err.message : '登录失败，请检查网络连接')
     } finally {
       setLoading(false)
     }
@@ -72,22 +70,20 @@ export default function LoginPage() {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
-    setSuccess('')
 
     // Validation
     if (!registerUsername || !registerEmail || !registerPassword || !registerConfirmPassword || !registerFirstName || !registerLastName) {
-      setError('请填写所有字段')
+      showError('请填写所有字段')
       return
     }
 
     if (registerPassword !== registerConfirmPassword) {
-      setError('两次输入的密码不一致')
+      showError('两次输入的密码不一致')
       return
     }
 
     if (registerPassword.length < 6) {
-      setError('密码长度至少为 6 位')
+      showError('密码长度至少为 6 位')
       return
     }
 
@@ -101,7 +97,7 @@ export default function LoginPage() {
         throw new Error(data.message || '注册失败')
       }
 
-      setSuccess('注册成功，请登录')
+      showSuccess('注册成功，请登录')
       setTimeout(() => {
         setIsLogin(true)
         setRegisterUsername('')
@@ -112,7 +108,7 @@ export default function LoginPage() {
         setRegisterLastName('')
       }, 1000)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '注册失败，请检查网络连接')
+      showError(err instanceof Error ? err.message : '注册失败，请检查网络连接')
     } finally {
       setLoading(false)
     }
@@ -129,22 +125,6 @@ export default function LoginPage() {
           <h1 className="text-2xl font-bold text-slate-900">Agent Parallel System</h1>
           <p className="text-slate-500 mt-2">多智能体并行协作系统</p>
         </div>
-
-        {/* Error Message */}
-        {error && (
-          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-            <p className="text-red-700 text-sm">{error}</p>
-          </div>
-        )}
-
-        {/* Success Message */}
-        {success && (
-          <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
-            <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
-            <p className="text-green-700 text-sm">{success}</p>
-          </div>
-        )}
 
         {/* Login Form */}
         {isLogin ? (
@@ -315,8 +295,6 @@ export default function LoginPage() {
               <button
                 onClick={() => {
                   setIsLogin(false)
-                  setError('')
-                  setSuccess('')
                 }}
                 className="text-violet-500 hover:text-violet-600 text-sm font-medium ml-1"
               >
@@ -329,8 +307,6 @@ export default function LoginPage() {
               <button
                 onClick={() => {
                   setIsLogin(true)
-                  setError('')
-                  setSuccess('')
                 }}
                 className="text-violet-500 hover:text-violet-600 text-sm font-medium ml-1"
               >

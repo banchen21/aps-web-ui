@@ -83,11 +83,8 @@ export default function WorkspacesPage() {
     e.preventDefault()
     if (!showEditModal) return
 
-    setError('')
-    setSuccess('')
-
     if (!formData.name.trim()) {
-      setError('工作空间名称不能为空')
+      showError('工作空间名称不能为空')
       return
     }
 
@@ -104,19 +101,16 @@ export default function WorkspacesPage() {
         throw new Error(data.message || '更新工作空间失败')
       }
 
-      setSuccess('工作空间更新成功')
+      showSuccess('工作空间更新成功')
       setFormData({ name: '', description: '', is_public: false })
       setShowEditModal(null)
       await fetchWorkspaces()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新工作空间失败')
+      showError(err instanceof Error ? err.message : '更新工作空间失败')
     }
   }
 
   const handleDeleteWorkspace = async (workspaceId: string) => {
-    setError('')
-    setSuccess('')
-
     try {
       const response = await workspaceService.deleteWorkspace(workspaceId)
       const data = await response.json()
@@ -125,11 +119,11 @@ export default function WorkspacesPage() {
         throw new Error(data.message || '删除工作空间失败')
       }
 
-      setSuccess('工作空间删除成功')
+      showSuccess('工作空间删除成功')
       setShowDeleteConfirm(null)
       await fetchWorkspaces()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除工作空间失败')
+      showError(err instanceof Error ? err.message : '删除工作空间失败')
     }
   }
 
@@ -163,22 +157,6 @@ export default function WorkspacesPage() {
           创建工作空间
         </button>
       </div>
-
-      {/* Error Message */}
-      {error && (
-        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-          <p className="text-red-700 dark:text-red-400 text-sm">{error}</p>
-        </div>
-      )}
-
-      {/* Success Message */}
-      {success && (
-        <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-start gap-3">
-          <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
-          <p className="text-green-700 dark:text-green-400 text-sm">{success}</p>
-        </div>
-      )}
 
       {/* Loading State */}
       {loading ? (
