@@ -72,7 +72,7 @@ export interface CompleteTaskRequest {
 
 const getAuthHeader = () => ({
   'Content-Type': 'application/json',
-  'Authorization': `Bearer ${localStorage.getItem('aps_token')}`,
+  'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
 })
 
 export const agentService = {

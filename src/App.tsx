@@ -59,7 +59,7 @@ function AppLayout() {
   const { messages, removeMessage } = useToast()
 
   // Check auth and setup token refresh
-  const token = localStorage.getItem('aps_token')
+  const token = localStorage.getItem('access_token')
   useEffect(() => {
     if (!token) {
       navigate('/login')

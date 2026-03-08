@@ -41,7 +41,7 @@ export interface CreateMemoryRelationshipRequest {
 }
 
 const getAuthHeader = () => ({
-  Authorization: `Bearer ${localStorage.getItem('aps_token')}`,
+  Authorization: `Bearer ${localStorage.getItem('access_token')}`,
   'Content-Type': 'application/json',
 })
 

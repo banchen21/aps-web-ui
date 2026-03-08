@@ -337,15 +337,57 @@ export const taskService = {
 
 ### 4. API 文档页面（APIDocsPage）
 
-**状态**：页面组件存在但内容为空
+**状态**：前端页面为空，但后端已提供完整的 Swagger UI
 
-**缺失内容**：
-- API 文档内容
-- 交互式 API 测试
-- 请求/响应示例
-- 认证说明
+**后端实现**：
+- Swagger UI 路由：`http://localhost:8000/api/v1/swagger-ui`
+- OpenAPI 规范：`http://localhost:8000/api/v1/openapi.json`
+- 完整的 API 文档：`~/Desktop/agent-parallel-system/docs/openapi.yaml`
 
-**建议**：集成 Swagger UI 或 Redoc
+**前端集成方案**：
+
+**方案 A：iframe 嵌入**（推荐，最简单）
+```typescript
+// src/pages/APIDocsPage.tsx
+export default function APIDocsPage() {
+  return (
+    <div className="h-full">
+      <iframe
+        src="http://localhost:8000/api/v1/swagger-ui"
+        className="w-full h-full border-0"
+        title="API Documentation"
+      />
+    </div>
+  )
+}
+```
+
+**方案 B：使用 swagger-ui-react**
+```bash
+pnpm add swagger-ui-react
+```
+
+```typescript
+import SwaggerUI from 'swagger-ui-react'
+import 'swagger-ui-react/swagger-ui.css'
+
+export default function APIDocsPage() {
+  return <SwaggerUI url="http://localhost:8000/api/v1/openapi.json" />
+}
+```
+
+**方案 C：使用 Redoc**
+```bash
+pnpm add redoc
+```
+
+```typescript
+import { RedocStandalone } from 'redoc'
+
+export default function APIDocsPage() {
+  return <RedocStandalone specUrl="http://localhost:8000/api/v1/openapi.json" />
+}
+```
 
 ### 5. 环境变量管理
 

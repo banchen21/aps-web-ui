@@ -8,22 +8,20 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const { showSuccess, showError } = useToast()
   const [isLogin, setIsLogin] = useState(true)
-  
+
   // Login state
-  const [username, setUsername] = useState('alice_01')
-  const [password, setPassword] = useState('ChangeMe#123')
+  const [username, setUsername] = useState('banchen')
+  const [password, setPassword] = useState('12345678')
   const [showPassword, setShowPassword] = useState(false)
-  
+
   // Register state
   const [registerUsername, setRegisterUsername] = useState('')
   const [registerEmail, setRegisterEmail] = useState('')
   const [registerPassword, setRegisterPassword] = useState('')
   const [registerConfirmPassword, setRegisterConfirmPassword] = useState('')
-  const [registerFirstName, setRegisterFirstName] = useState('')
-  const [registerLastName, setRegisterLastName] = useState('')
   const [showRegisterPassword, setShowRegisterPassword] = useState(false)
   const [showRegisterConfirmPassword, setShowRegisterConfirmPassword] = useState(false)
-  
+
   // Common state
   const [loading, setLoading] = useState(false)
 
@@ -46,21 +44,19 @@ export default function LoginPage() {
         throw new Error(data.message || '登录失败')
       }
 
-      // 后端返回的数据结构: { code, message, data: { access_token, refresh_token, ... } }
-      const authData = data.data
-      localStorage.setItem('aps_token', authData.access_token)
+      const authData = data
+      localStorage.setItem('access_token', authData.access_token)
       if (authData.refresh_token) {
-        localStorage.setItem('aps_refresh_token', authData.refresh_token)
+        localStorage.setItem('refresh_token', authData.refresh_token)
       }
-      localStorage.setItem('aps_user', JSON.stringify(authData.user || {}))
+
+      localStorage.setItem('aps_user', JSON.stringify({ username }))
       showSuccess('登录成功，正在跳转...')
-      
+
       // 设置自动 Token 刷新
       authService.setupAutoRefresh()
-      
-      setTimeout(() => {
-        navigate('/dashboard')
-      }, 500)
+
+      navigate('/dashboard')
     } catch (err) {
       showError(err instanceof Error ? err.message : '登录失败，请检查网络连接')
     } finally {
@@ -72,7 +68,7 @@ export default function LoginPage() {
     e.preventDefault()
 
     // Validation
-    if (!registerUsername || !registerEmail || !registerPassword || !registerConfirmPassword || !registerFirstName || !registerLastName) {
+    if (!registerUsername || !registerEmail || !registerPassword || !registerConfirmPassword) {
       showError('请填写所有字段')
       return
     }
@@ -90,7 +86,7 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      const response = await authService.register(registerUsername, registerEmail, registerPassword, registerFirstName, registerLastName)
+      const response = await authService.register(registerUsername, registerEmail, registerPassword)
       const data = await response.json()
 
       if (!response.ok) {
@@ -104,8 +100,8 @@ export default function LoginPage() {
         setRegisterEmail('')
         setRegisterPassword('')
         setRegisterConfirmPassword('')
-        setRegisterFirstName('')
-        setRegisterLastName('')
+        setUsername(registerUsername)
+        setPassword(registerPassword)
       }, 1000)
     } catch (err) {
       showError(err instanceof Error ? err.message : '注册失败，请检查网络连接')
@@ -200,30 +196,6 @@ export default function LoginPage() {
                 onChange={(e) => setRegisterEmail(e.target.value)}
                 className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition-all"
                 placeholder="请输入邮箱"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">名字</label>
-              <input
-                type="text"
-                value={registerFirstName}
-                onChange={(e) => setRegisterFirstName(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition-all"
-                placeholder="请输入名字"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">姓氏</label>
-              <input
-                type="text"
-                value={registerLastName}
-                onChange={(e) => setRegisterLastName(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition-all"
-                placeholder="请输入姓氏"
                 required
               />
             </div>

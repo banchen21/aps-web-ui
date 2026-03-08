@@ -1,5 +1,5 @@
-const API_BASE_URL = 'http://localhost:8000'
-
+const API_BASE_URL = 'http://0.0.0.0:8000'
+const API_BASE_URL_V1 = 'http://0.0.0.0:8000/api/v1'
 let refreshTokenTimeout: NodeJS.Timeout | null = null
 
 export const authService = {
@@ -12,30 +12,29 @@ export const authService = {
     }),
 
   // 注册
-  register: (username: string, email: string, password: string, first_name: string, last_name: string) =>
+  register: (username: string, email: string, password: string) =>
     fetch(`${API_BASE_URL}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, email, password, first_name, last_name }),
+      body: JSON.stringify({ username, email, password}),
     }),
 
   // 刷新 Token
   refreshToken: (refreshToken: string) =>
-    fetch(`${API_BASE_URL}/auth/refresh`, {
+    fetch(`${API_BASE_URL}/refresh`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('aps_token')}`,
+        'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
       },
       body: JSON.stringify({ refresh_token: refreshToken }),
     }),
 
   // 自动刷新 Token - 在后台工作
   setupAutoRefresh: () => {
-    const token = localStorage.getItem('aps_token')
-    const refreshToken = localStorage.getItem('aps_refresh_token')
+    const token = localStorage.getItem('refresh_token')
 
-    if (!token || !refreshToken) return
+    if (!token) return
 
     try {
       const payload = JSON.parse(atob(token.split('.')[1]))
@@ -49,13 +48,13 @@ export const authService = {
       if (refreshTime > 0) {
         refreshTokenTimeout = setTimeout(async () => {
           try {
-            const response = await authService.refreshToken(refreshToken)
+            const response = await authService.refreshToken(token)
             const data = await response.json()
 
             if (response.ok) {
-              localStorage.setItem('aps_token', data.data.access_token)
+              localStorage.setItem('access_token', data.data.access_token)
               if (data.data.refresh_token) {
-                localStorage.setItem('aps_refresh_token', data.data.refresh_token)
+                localStorage.setItem('refresh_token', data.data.refresh_token)
               }
               // 递归设置下一次刷新
               authService.setupAutoRefresh()
@@ -85,8 +84,8 @@ export const authService = {
   // 登出
   logout: () => {
     authService.clearAutoRefresh()
-    localStorage.removeItem('aps_token')
-    localStorage.removeItem('aps_refresh_token')
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
     localStorage.removeItem('aps_user')
   },
 }

@@ -4,32 +4,31 @@ import { chatService, ChatMessage } from '../services/chat'
 import { useToast } from '../contexts/ToastContext'
 
 export default function ChatPage() {
-  const { showSuccess, showError } = useToast()
+  const { showError } = useToast()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(false)
   const [messageLoading, setMessageLoading] = useState(false)
   const [messageInput, setMessageInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  const sessionId = localStorage.getItem('aps_user')
-    ? JSON.parse(localStorage.getItem('aps_user') || '{}').id
-    : null
+  // 获取用户信息
+  const getApsUser = () => {
+    const userStr = localStorage.getItem('aps_user')
+    return userStr ? JSON.parse(userStr) : null
+  }
 
-  useEffect(() => {
-    if (sessionId) {
-      fetchMessages()
-    }
-  }, [sessionId])
+  const aps_user = getApsUser()
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
   const fetchMessages = async () => {
-    if (!sessionId) return
+    if (!aps_user?.id) return
     try {
       setLoading(true)
-      const data = await chatService.getSessionMessages(sessionId)
+      const data = await chatService.getSessionMessages()
+      // 这里如果后端获取历史记录的接口返回的也是嵌套结构，也需要像下面一样 map 一下
       setMessages(data)
     } catch (err) {
       showError(err instanceof Error ? err.message : '获取消息历史失败')
@@ -40,31 +39,65 @@ export default function ChatPage() {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!sessionId || !messageInput.trim()) return
+
+    // 1. 基础校验
+    if (!aps_user || !messageInput.trim() || messageLoading) return
+
+    const currentInput = messageInput.trim()
 
     try {
+      // 2. 开启加载状态
       setMessageLoading(true)
+
+      // 3. 【新增】构造用户自己的消息对象，并立即添加到界面上
       const userMessage: ChatMessage = {
-        id: Date.now().toString(),
-        session_id: sessionId,
+        id: `user-${Date.now()}`,
         role: 'user',
-        content: messageInput,
-        tokens_used: null,
+        content: currentInput,
         created_at: new Date().toISOString(),
       }
-      setMessages([...messages, userMessage])
-      const inputContent = messageInput
+      setMessages((prev) => [...prev, userMessage])
+
+      // 4. 【新增】立即清空输入框，提升用户体验
       setMessageInput('')
 
+      // 5. 调用后端接口
       const response = await chatService.sendMessage({
-        session_id: sessionId,
-        content: inputContent,
+        user: aps_user.username || 'unknown',
+        content: currentInput,
+        metadata: {}
       })
 
-      setMessages((prev) => [...prev, response])
+      console.log('后端原始响应:', response)
+
+      // 6. 适配逻辑：处理 AI 的响应
+      if (response && response.content) {
+        const aiRaw = response.content;
+
+        let displayContent = "";
+        if (typeof aiRaw.content === 'string') {
+          displayContent = aiRaw.content;
+        } else if (aiRaw.content && typeof aiRaw.content === 'object') {
+          // 提取 Rust Enum 的 Text 值 (如 {"Text": "..."})
+          displayContent = aiRaw.content.Text || JSON.stringify(aiRaw.content);
+        }
+
+        const aiMessage: ChatMessage = {
+          id: `ai-${Date.now()}`,
+          role: 'assistant',
+          content: displayContent,
+          created_at: aiRaw.created_at || new Date().toISOString(),
+        }
+
+        // 7. 将 AI 消息添加到数组末尾
+        setMessages((prev) => [...prev, aiMessage])
+      }
     } catch (err) {
+      console.error("发送失败:", err)
       showError(err instanceof Error ? err.message : '发送消息失败')
+      // 可选：如果发送失败，可以把刚才添加的用户消息标记为失败，或者在这里逻辑处理
     } finally {
+      // 8. 关闭加载状态
       setMessageLoading(false)
     }
   }
@@ -103,19 +136,15 @@ export default function ChatPage() {
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-xs lg:max-w-md px-4 py-3 rounded-lg ${
-                  message.role === 'user'
-                    ? 'bg-blue-600 text-white rounded-br-none'
-                    : 'bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white rounded-bl-none'
-                }`}
-              >
-                <p className="text-sm">{message.content}</p>
-                <p
-                  className={`text-xs mt-1 ${
-                    message.role === 'user'
-                      ? 'text-blue-100'
-                      : 'text-slate-500 dark:text-slate-400'
+                className={`max-w-[80%] lg:max-w-md px-4 py-3 rounded-lg ${message.role === 'user'
+                  ? 'bg-blue-600 text-white rounded-br-none'
+                  : 'bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white rounded-bl-none'
                   }`}
+              >
+                <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                <p
+                  className={`text-[10px] mt-1 opacity-70 ${message.role === 'user' ? 'text-right' : 'text-left'
+                    }`}
                 >
                   {new Date(message.created_at).toLocaleTimeString()}
                 </p>
@@ -131,7 +160,7 @@ export default function ChatPage() {
         <form onSubmit={handleSendMessage} className="flex gap-3">
           <input
             type="text"
-            placeholder="输入消息..."
+            placeholder={messageLoading ? "对方正在输入..." : "输入消息..."}
             value={messageInput}
             onChange={(e) => setMessageInput(e.target.value)}
             disabled={messageLoading}
@@ -142,8 +171,14 @@ export default function ChatPage() {
             disabled={messageLoading || !messageInput.trim()}
             className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 flex-shrink-0"
           >
-            <Send size={20} />
-            <span className="hidden sm:inline">发送</span>
+            {messageLoading ? (
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+            ) : (
+              <>
+                <Send size={20} />
+                <span className="hidden sm:inline">发送</span>
+              </>
+            )}
           </button>
         </form>
       </div>
