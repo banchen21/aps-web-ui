@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Cpu, HardDrive, Network, Activity, Server, Database, Zap, MemoryStick } from 'lucide-react'
+import { systemService, SystemInfo } from '../services/system'
+import { useToast } from '../contexts/ToastContext'
 
 interface MetricData {
   name: string
@@ -10,32 +12,66 @@ interface MetricData {
 }
 
 export default function MonitorPage() {
-  const [metrics, setMetrics] = useState({
-    cpu: 42,
-    memory: 68,
-    disk: 35,
-    network: 55,
-  })
+  const { showError } = useToast()
+  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
+  const [prevNetworkData, setPrevNetworkData] = useState<{ rx: number; tx: number; time: number } | null>(null)
+  const [networkSpeed, setNetworkSpeed] = useState({ rx: 0, tx: 0 })
 
-  // Simulate real-time updates
+  // 获取系统信息
   useEffect(() => {
-    const interval = setInterval(() => {
-      setMetrics({
-        cpu: Math.floor(Math.random() * 30) + 30,
-        memory: Math.floor(Math.random() * 20) + 60,
-        disk: 35,
-        network: Math.floor(Math.random() * 40) + 30,
-      })
-    }, 3000)
+    const fetchSystemInfo = async () => {
+      try {
+        const data = await systemService.getSystemInfo()
+        const currentTime = Date.now()
+        
+        // 计算实时网速
+        setPrevNetworkData((prev) => {
+          if (prev) {
+            const timeDiff = (currentTime - prev.time) / 1000 // 转换为秒
+            if (timeDiff > 0) {
+              const rxSpeed = (data.net_rx_speed - prev.rx) / timeDiff // 字节/秒
+              const txSpeed = (data.net_tx_speed - prev.tx) / timeDiff // 字节/秒
+              
+              setNetworkSpeed({
+                rx: Math.max(0, rxSpeed), // 避免负数
+                tx: Math.max(0, txSpeed)
+              })
+            }
+          }
+          
+          // 返回新的网络数据
+          return {
+            rx: data.net_rx_speed,
+            tx: data.net_tx_speed,
+            time: currentTime
+          }
+        })
+        
+        setSystemInfo(data)
+      } catch (err) {
+        showError('获取系统信息失败')
+      }
+    }
 
+    fetchSystemInfo()
+    // 每 3 秒刷新一次
+    const interval = setInterval(fetchSystemInfo, 3000)
     return () => clearInterval(interval)
-  }, [])
+  }, [showError])
+
+  // 计算百分比
+  const cpuPercent = systemInfo ? Math.round(systemInfo.cpu_usage) : 0
+  const memoryPercent = systemInfo ? Math.round((systemInfo.used_memory / systemInfo.total_memory) * 100) : 0
+  const diskPercent = systemInfo ? Math.round((systemInfo.disk_usage / systemInfo.total_disk) * 100) : 0
+  // 网络速度转换为 MB/s，并限制在 0-100 范围内
+  const totalNetworkSpeed = (networkSpeed.rx + networkSpeed.tx) / 1024 / 1024 // MB/s
+  const networkPercent = Math.min(Math.round(totalNetworkSpeed * 10), 100) // 假设 10MB/s = 100%
 
   const metricCards: MetricData[] = [
-    { name: 'CPU 使用率', value: metrics.cpu, icon: Cpu, color: 'text-blue-500', gradient: 'from-blue-500 to-violet-500' },
-    { name: '内存使用', value: metrics.memory, icon: MemoryStick, color: 'text-green-500', gradient: 'from-green-500 to-emerald-500' },
-    { name: '磁盘使用', value: metrics.disk, icon: HardDrive, color: 'text-yellow-500', gradient: 'from-yellow-500 to-orange-500' },
-    { name: '网络流量', value: metrics.network, icon: Network, color: 'text-purple-500', gradient: 'from-purple-500 to-pink-500' },
+    { name: 'CPU 使用率', value: cpuPercent, icon: Cpu, color: 'text-blue-500', gradient: 'from-blue-500 to-violet-500' },
+    { name: '内存使用', value: memoryPercent, icon: MemoryStick, color: 'text-green-500', gradient: 'from-green-500 to-emerald-500' },
+    { name: '磁盘使用', value: diskPercent, icon: HardDrive, color: 'text-yellow-500', gradient: 'from-yellow-500 to-orange-500' },
+    { name: '网络流量', value: networkPercent, icon: Network, color: 'text-purple-500', gradient: 'from-purple-500 to-pink-500' },
   ]
 
   const servers = [

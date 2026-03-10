@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts'
-import { Activity, Bot, CheckCircle, Cpu, TrendingUp, TrendingDown, Clock, Zap } from 'lucide-react'
+import { Activity, Bot, CheckCircle, Cpu, TrendingUp, TrendingDown, Clock, Zap, HardDrive, Network } from 'lucide-react'
+import { systemService, SystemInfo } from '../services/system'
+import { useToast } from '../contexts/ToastContext'
 
 const taskData = [
   { name: '10:00', completed: 45, new: 38 },
@@ -12,12 +14,6 @@ const taskData = [
   { name: '16:00', completed: 42, new: 35 },
 ]
 
-const performanceData = [
-  { name: 'CPU', value: 42 },
-  { name: '内存', value: 68 },
-  { name: '磁盘', value: 35 },
-  { name: '网络', value: 55 },
-]
 
 const activities = [
   { id: 1, type: 'success', title: '任务 #2341 已完成', time: '2 分钟前', icon: CheckCircle },
@@ -34,6 +30,42 @@ const stats = [
 ]
 
 export default function DashboardPage() {
+  const { showError } = useToast()
+  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  // 获取系统信息
+  useEffect(() => {
+    const fetchSystemInfo = async () => {
+      try {
+        const data = await systemService.getSystemInfo()
+        setSystemInfo(data)
+      } catch (err) {
+        showError('获取系统信息失败')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchSystemInfo()
+    // 每 5 秒刷新一次
+    const interval = setInterval(fetchSystemInfo, 5000)
+    return () => clearInterval(interval)
+  }, [showError])
+
+  // 计算百分比
+  const cpuPercent = systemInfo ? Math.round(systemInfo.cpu_usage) : 0
+  const memoryPercent = systemInfo ? Math.round((systemInfo.used_memory / systemInfo.total_memory) * 100) : 0
+  const diskPercent = systemInfo ? Math.round((systemInfo.disk_usage / systemInfo.total_disk) * 100) : 0
+  const networkPercent = systemInfo ? Math.min(Math.round((systemInfo.net_rx_speed + systemInfo.net_tx_speed) / 1024 / 1024), 100) : 0
+
+  const performanceData = [
+    { name: 'CPU', value: cpuPercent, icon: Cpu },
+    { name: '内存', value: memoryPercent, icon: HardDrive },
+    { name: '磁盘', value: diskPercent, icon: HardDrive },
+    { name: '网络', value: networkPercent, icon: Network },
+  ]
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
