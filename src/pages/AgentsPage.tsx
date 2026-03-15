@@ -1,47 +1,66 @@
 import { useState, useEffect } from 'react'
-import { Bot, Plus, Eye, Trash2, AlertCircle, CheckCircle } from 'lucide-react'
-import { agentService, Agent, RegisterAgentRequest, UpdateAgentStatusRequest, Capability, AgentEndpoints, AgentLimits } from '../services/agent'
+import { Bot, Plus, Eye, Trash2 } from 'lucide-react'
+import { Agent, agentService, RegisterAgentRequest } from '../services/agent'
+import { workspaceService, WorkspaceResponse } from '../services/workspace'
 import { useToast } from '../contexts/ToastContext'
 
-const statusConfig = {
-  online: { label: '在线', class: 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-400' },
-  idle: { label: '空闲', class: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400' },
-  busy: { label: '工作中', class: 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900 dark:text-yellow-400' },
-  offline: { label: '离线', class: 'bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-400' },
-  error: { label: '错误', class: 'bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-400' },
+type AgentWithStatus = Agent & {
+  owner_username: string
+  mcp_list: string[]
+  status: 'online' | 'working' | 'idle'
+  status_label: string
+}
+
+const kindConfig: Record<string, { label: string; class: string }> = {
+  general: { label: '通用', class: 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-400' },
+  code: { label: '代码', class: 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-400' },
+  research: { label: '研究', class: 'bg-purple-100 text-purple-600 dark:bg-purple-900 dark:text-purple-400' },
+  custom: { label: '自定义', class: 'bg-orange-100 text-orange-600 dark:bg-orange-900 dark:text-orange-400' },
 }
 
 export default function AgentsPage() {
   const { showSuccess, showError } = useToast()
-  const [agents, setAgents] = useState<Agent[]>([])
+  const [agents, setAgents] = useState<AgentWithStatus[]>([])
+  const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([])
   const [loading, setLoading] = useState(true)
   const [showRegisterModal, setShowRegisterModal] = useState(false)
   const [showDetailModal, setShowDetailModal] = useState(false)
-  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
+  const [selectedAgent, setSelectedAgent] = useState<AgentWithStatus | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
 
   const [registerForm, setRegisterForm] = useState({
     name: '',
-    description: '',
-    capabilities: '',
-    taskExecution: '',
-    healthCheck: '',
-    statusUpdate: '',
-    maxConcurrentTasks: 5,
-    maxExecutionTime: 300,
-    maxMemoryUsage: '',
-    rateLimitPerMinute: '',
+    kind: 'general' as 'general' | 'code' | 'research' | 'custom',
+    workspace_name: '',
+    // 移除 description，因为后端表结构中没有这个字段
   })
 
   useEffect(() => {
     fetchAgents()
+    fetchWorkspaces()
   }, [])
 
   const fetchAgents = async () => {
     try {
       setLoading(true)
-      const data = await agentService.getAgents()
-      setAgents(data)
+      const [agentList, statusList] = await Promise.all([
+        agentService.getAgents(),
+        agentService.getAgentStatuses(),
+      ])
+
+      const statusMap = new Map(statusList.map((item) => [item.agent_id, item]))
+      const mergedAgents: AgentWithStatus[] = agentList.map((agent) => {
+        const statusInfo = statusMap.get(agent.id)
+        return {
+          ...agent,
+          owner_username: agent.owner_username || '',
+          mcp_list: agent.mcp_list || [],
+          status: statusInfo?.status || 'idle',
+          status_label: statusInfo?.status_label || '空闲',
+        }
+      })
+
+      setAgents(mergedAgents)
     } catch (err) {
       showError(err instanceof Error ? err.message : '获取智能体列表失败')
     } finally {
@@ -49,55 +68,47 @@ export default function AgentsPage() {
     }
   }
 
+  const fetchWorkspaces = async () => {
+    try {
+      const response = await workspaceService.getWorkspaces()
+      const data = await response.json()
+      if (response.ok) {
+        setWorkspaces(data || [])
+      }
+    } catch (err) {
+      console.error('获取工作空间列表失败:', err)
+    }
+  }
+
+  const getApsUser = () => {
+    const userStr = localStorage.getItem('aps_user')
+    return userStr ? JSON.parse(userStr) : null
+  }
+
+  const aps_user = getApsUser()
+
   const handleRegisterAgent = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!registerForm.name || !registerForm.capabilities || !registerForm.taskExecution || !registerForm.healthCheck) {
-      showError('请填写所有必填项')
+    if (!registerForm.name || !registerForm.workspace_name) {
+      showError('请填写智能体名称和工作空间')
       return
     }
 
     try {
-      const capabilities: Capability[] = registerForm.capabilities.split(',').map(c => ({
-        name: c.trim(),
-        description: '',
-        version: '1.0.0',
-        parameters: {},
-      }))
-
-      const endpoints: AgentEndpoints = {
-        task_execution: registerForm.taskExecution,
-        health_check: registerForm.healthCheck,
-        status_update: registerForm.statusUpdate || undefined,
-      }
-
-      const limits: AgentLimits = {
-        max_concurrent_tasks: registerForm.maxConcurrentTasks,
-        max_execution_time: registerForm.maxExecutionTime,
-        max_memory_usage: registerForm.maxMemoryUsage ? parseInt(registerForm.maxMemoryUsage) : undefined,
-        rate_limit_per_minute: registerForm.rateLimitPerMinute ? parseInt(registerForm.rateLimitPerMinute) : undefined,
-      }
-
       const request: RegisterAgentRequest = {
+        user_name: aps_user.username,
         name: registerForm.name,
-        description: registerForm.description,
-        capabilities,
-        endpoints,
-        limits,
+        kind: registerForm.kind,
+        workspace_name: registerForm.workspace_name,
+        // description 移除
       }
 
       await agentService.registerAgent(request)
-      showSuccess('智能体注册成功')
+      showSuccess('智能体创建成功')
       setRegisterForm({
         name: '',
-        description: '',
-        capabilities: '',
-        taskExecution: '',
-        healthCheck: '',
-        statusUpdate: '',
-        maxConcurrentTasks: 5,
-        maxExecutionTime: 300,
-        maxMemoryUsage: '',
-        rateLimitPerMinute: '',
+        kind: 'general',
+        workspace_name: '',
       })
       setShowRegisterModal(false)
       fetchAgents()
@@ -106,16 +117,7 @@ export default function AgentsPage() {
     }
   }
 
-  const handleUpdateStatus = async (agentId: string, newStatus: 'online' | 'offline' | 'busy' | 'idle' | 'error') => {
-    try {
-      const request: UpdateAgentStatusRequest = { status: newStatus }
-      await agentService.updateAgentStatus(agentId, request)
-      showSuccess('智能体状态已更新')
-      fetchAgents()
-    } catch (err) {
-      showError(err instanceof Error ? err.message : '更新状态失败')
-    }
-  }
+  // 移除 handleUpdateStatus，因为新数据结构中没有 status 字段
 
   const handleDeleteAgent = async (agentId: string) => {
     try {
@@ -128,9 +130,15 @@ export default function AgentsPage() {
     }
   }
 
-  const handleViewDetail = (agent: Agent) => {
+  const handleViewDetail = (agent: AgentWithStatus) => {
     setSelectedAgent(agent)
     setShowDetailModal(true)
+  }
+
+  const statusConfig: Record<AgentWithStatus['status'], string> = {
+    online: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+    working: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+    idle: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
   }
 
   const getAgentColor = (index: number) => {
@@ -198,27 +206,27 @@ export default function AgentsPage() {
                   </div>
                   <div>
                     <h3 className="font-semibold text-slate-900 dark:text-white">{agent.name}</h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">{agent.capabilities.map(c => c.name).join(', ')}</p>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${kindConfig[agent.kind]?.class || 'bg-slate-100 text-slate-600'}`}>
+                        {kindConfig[agent.kind]?.label || agent.kind}
+                      </span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${statusConfig[agent.status]}`}>
+                        {agent.status_label}
+                      </span>
+                    </div>
                   </div>
                 </div>
-                <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${statusConfig[agent.status as keyof typeof statusConfig]?.class || statusConfig.offline.class}`}>
-                  {statusConfig[agent.status as keyof typeof statusConfig]?.label || agent.status}
-                </span>
               </div>
 
-              {/* Stats */}
-              <div className="flex justify-between py-4 border-y border-slate-200 dark:border-slate-700">
-                <div className="text-center">
-                  <div className="text-xl font-bold text-slate-900 dark:text-white">{agent.current_load}</div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">当前任务</div>
+              {/* Info Section 替代原来的 Stats */}
+              <div className="py-4 border-y border-slate-200 dark:border-slate-700 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500 dark:text-slate-400">工作空间</span>
+                  <span className="text-slate-900 dark:text-white font-medium">{agent.workspace_name}</span>
                 </div>
-                <div className="text-center">
-                  <div className="text-xl font-bold text-slate-900 dark:text-white">{(agent.success_rate * 100).toFixed(0)}%</div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">成功率</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-xl font-bold text-slate-900 dark:text-white">{agent.max_concurrent_tasks}</div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">最大并发</div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500 dark:text-slate-400">MCP 数量</span>
+                  <span className="text-slate-900 dark:text-white font-medium">{agent.mcp_list.length}</span>
                 </div>
               </div>
 
@@ -231,12 +239,7 @@ export default function AgentsPage() {
                   <Eye className="w-4 h-4" />
                   详情
                 </button>
-                <button
-                  onClick={() => handleUpdateStatus(agent.id, agent.status === 'idle' ? 'busy' : 'idle')}
-                  className="flex-1 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors flex items-center justify-center gap-2"
-                >
-                  {agent.status === 'idle' ? '激活' : '暂停'}
-                </button>
+                {/* 移除了状态切换按钮 */}
                 <button
                   onClick={() => setDeleteConfirm(agent.id)}
                   className="px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/20 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/40 transition-colors flex items-center justify-center gap-2"
@@ -254,142 +257,55 @@ export default function AgentsPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
           <div className="bg-white dark:bg-slate-800 rounded-xl max-w-2xl w-full p-6 my-8">
             <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">注册新智能体</h2>
-            <form onSubmit={handleRegisterAgent} className="space-y-4 max-h-96 overflow-y-auto">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    智能体名称 *
-                  </label>
-                  <input
-                    type="text"
-                    value={registerForm.name}
-                    onChange={(e) => setRegisterForm({ ...registerForm, name: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-                    placeholder="输入智能体名称"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    描述
-                  </label>
-                  <input
-                    type="text"
-                    value={registerForm.description}
-                    onChange={(e) => setRegisterForm({ ...registerForm, description: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-                    placeholder="输入智能体描述"
-                  />
-                </div>
+            <form onSubmit={handleRegisterAgent} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  智能体名称 *
+                </label>
+                <input
+                  type="text"
+                  value={registerForm.name}
+                  onChange={(e) => setRegisterForm({ ...registerForm, name: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+                  placeholder="输入智能体名称"
+                />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  能力 (逗号分隔) *
+                  智能体类型 *
                 </label>
-                <input
-                  type="text"
-                  value={registerForm.capabilities}
-                  onChange={(e) => setRegisterForm({ ...registerForm, capabilities: e.target.value })}
+                <select
+                  value={registerForm.kind}
+                  onChange={(e) => setRegisterForm({ ...registerForm, kind: e.target.value as any })}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-                  placeholder="例如: 代码审查, 文本分析, 数据处理"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    任务执行端点 *
-                  </label>
-                  <input
-                    type="text"
-                    value={registerForm.taskExecution}
-                    onChange={(e) => setRegisterForm({ ...registerForm, taskExecution: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-                    placeholder="http://localhost:3000/execute"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    健康检查端点 *
-                  </label>
-                  <input
-                    type="text"
-                    value={registerForm.healthCheck}
-                    onChange={(e) => setRegisterForm({ ...registerForm, healthCheck: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-                    placeholder="http://localhost:3000/health"
-                  />
-                </div>
+                >
+                  <option value="general">通用</option>
+                  <option value="code">代码</option>
+                  <option value="research">研究</option>
+                  <option value="custom">自定义</option>
+                </select>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  状态更新端点
+                  工作空间 *
                 </label>
-                <input
-                  type="text"
-                  value={registerForm.statusUpdate}
-                  onChange={(e) => setRegisterForm({ ...registerForm, statusUpdate: e.target.value })}
+                <select
+                  value={registerForm.workspace_name}
+                  onChange={(e) => setRegisterForm({ ...registerForm, workspace_name: e.target.value })}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-                  placeholder="http://localhost:3000/status"
-                />
+                >
+                  <option value="">选择工作空间</option>
+                  {workspaces.map((workspace) => (
+                    <option key={workspace.id} value={workspace.name}>
+                      {workspace.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    最大并发任务数
-                  </label>
-                  <input
-                    type="number"
-                    value={registerForm.maxConcurrentTasks}
-                    onChange={(e) => setRegisterForm({ ...registerForm, maxConcurrentTasks: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-                    min="1"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    最大执行时间 (秒)
-                  </label>
-                  <input
-                    type="number"
-                    value={registerForm.maxExecutionTime}
-                    onChange={(e) => setRegisterForm({ ...registerForm, maxExecutionTime: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-                    min="1"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    最大内存使用 (MB)
-                  </label>
-                  <input
-                    type="number"
-                    value={registerForm.maxMemoryUsage}
-                    onChange={(e) => setRegisterForm({ ...registerForm, maxMemoryUsage: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    每分钟速率限制
-                  </label>
-                  <input
-                    type="number"
-                    value={registerForm.rateLimitPerMinute}
-                    onChange={(e) => setRegisterForm({ ...registerForm, rateLimitPerMinute: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-                  />
-                </div>
-              </div>
+              {/* 移除了描述输入框 */}
 
               <div className="flex gap-3 pt-4">
                 <button
@@ -423,44 +339,38 @@ export default function AgentsPage() {
               </div>
 
               <div>
-                <p className="text-sm text-slate-600 dark:text-slate-400">描述</p>
-                <p className="text-slate-900 dark:text-white font-semibold">{selectedAgent.description || '无'}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400">类型</p>
+                <p className="text-slate-900 dark:text-white font-semibold">{kindConfig[selectedAgent.kind]?.label || selectedAgent.kind}</p>
+              </div>
+
+              <div>
+                <p className="text-sm text-slate-600 dark:text-slate-400">工作空间</p>
+                <p className="text-slate-900 dark:text-white font-semibold">{selectedAgent.workspace_name}</p>
               </div>
 
               <div>
                 <p className="text-sm text-slate-600 dark:text-slate-400">状态</p>
-                <p className="text-slate-900 dark:text-white font-semibold">{statusConfig[selectedAgent.status as keyof typeof statusConfig]?.label || selectedAgent.status}</p>
+                <p className="text-slate-900 dark:text-white font-semibold">{selectedAgent.status_label}</p>
               </div>
 
               <div>
-                <p className="text-sm text-slate-600 dark:text-slate-400">当前任务</p>
-                <p className="text-slate-900 dark:text-white font-semibold">{selectedAgent.current_load}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400">所有者</p>
+                <p className="text-slate-900 dark:text-white font-semibold">{selectedAgent.owner_username}</p>
               </div>
 
               <div>
-                <p className="text-sm text-slate-600 dark:text-slate-400">成功率</p>
-                <p className="text-slate-900 dark:text-white font-semibold">{(selectedAgent.success_rate * 100).toFixed(2)}%</p>
-              </div>
-
-              <div>
-                <p className="text-sm text-slate-600 dark:text-slate-400">最大并发任务</p>
-                <p className="text-slate-900 dark:text-white font-semibold">{selectedAgent.max_concurrent_tasks}</p>
-              </div>
-
-              <div>
-                <p className="text-sm text-slate-600 dark:text-slate-400">能力</p>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {selectedAgent.capabilities.map((cap) => (
-                    <span key={cap.name} className="px-2 py-1 bg-violet-100 dark:bg-violet-900 text-violet-700 dark:text-violet-300 rounded text-xs">
-                      {cap.name}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <p className="text-sm text-slate-600 dark:text-slate-400">最后心跳</p>
-                <p className="text-slate-900 dark:text-white font-semibold text-xs">{new Date(selectedAgent.last_heartbeat).toLocaleString()}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400">MCP 列表</p>
+                {selectedAgent.mcp_list.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {selectedAgent.mcp_list.map((mcp, idx) => (
+                      <span key={idx} className="px-2 py-1 bg-violet-100 dark:bg-violet-900 text-violet-700 dark:text-violet-300 rounded text-xs">
+                        {mcp}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 dark:text-slate-400 text-sm">无 MCP 配置</p>
+                )}
               </div>
 
               <button

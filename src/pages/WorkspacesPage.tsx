@@ -10,13 +10,18 @@ export default function WorkspacesPage() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState<string | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
-  
+
   // Form state
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    is_public: false,
   })
+
+  const getApsUser = () => {
+    const userStr = localStorage.getItem('aps_user')
+    return userStr ? JSON.parse(userStr) : null
+  }
+  const aps_user = getApsUser()
 
   useEffect(() => {
     fetchWorkspaces()
@@ -32,7 +37,9 @@ export default function WorkspacesPage() {
         throw new Error(data.message || '获取工作空间列表失败')
       }
 
-      setWorkspaces(data.data || [])
+      console.log(data);
+      
+      setWorkspaces(data || [])
     } catch (err) {
       showError(err instanceof Error ? err.message : '获取工作空间列表失败')
     } finally {
@@ -52,17 +59,17 @@ export default function WorkspacesPage() {
       const response = await workspaceService.createWorkspace({
         name: formData.name,
         description: formData.description,
-        is_public: formData.is_public,
+        owner_username: aps_user.username,
       })
-
+      
       const data = await response.json()
-
+      
       if (!response.ok) {
         throw new Error(data.message || '创建工作空间失败')
       }
 
       showSuccess('工作空间创建成功')
-      setFormData({ name: '', description: '', is_public: false })
+      setFormData({ name: '', description: '' })
       setShowCreateModal(false)
       await fetchWorkspaces()
     } catch (err) {
@@ -74,9 +81,8 @@ export default function WorkspacesPage() {
     setFormData({
       name: workspace.name,
       description: workspace.description || '',
-      is_public: workspace.is_public,
     })
-    setShowEditModal(workspace.id)
+    setShowEditModal(workspace.name)
   }
 
   const handleUpdateWorkspace = async (e: React.FormEvent) => {
@@ -92,7 +98,6 @@ export default function WorkspacesPage() {
       const response = await workspaceService.updateWorkspace(showEditModal, {
         name: formData.name,
         description: formData.description,
-        is_public: formData.is_public,
       })
 
       const data = await response.json()
@@ -102,7 +107,7 @@ export default function WorkspacesPage() {
       }
 
       showSuccess('工作空间更新成功')
-      setFormData({ name: '', description: '', is_public: false })
+      setFormData({ name: '', description: '' })
       setShowEditModal(null)
       await fetchWorkspaces()
     } catch (err) {
@@ -110,9 +115,9 @@ export default function WorkspacesPage() {
     }
   }
 
-  const handleDeleteWorkspace = async (workspaceId: string) => {
+  const handleDeleteWorkspace = async (workspaceName: string) => {
     try {
-      const response = await workspaceService.deleteWorkspace(workspaceId)
+      const response = await workspaceService.deleteWorkspace(workspaceName)
       const data = await response.json()
 
       if (!response.ok) {
@@ -149,7 +154,7 @@ export default function WorkspacesPage() {
         <button
           onClick={() => {
             setShowCreateModal(true)
-            setFormData({ name: '', description: '', is_public: false })
+            setFormData({ name: '', description: '' })
           }}
           className="px-4 py-2 bg-violet-500 text-white rounded-lg hover:bg-violet-600 transition-colors flex items-center gap-2"
         >
@@ -187,13 +192,6 @@ export default function WorkspacesPage() {
                     <p className="text-sm text-slate-500 dark:text-slate-400">{workspace.description || '无描述'}</p>
                   </div>
                 </div>
-                <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                  workspace.is_public
-                    ? 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-400'
-                    : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
-                }`}>
-                  {workspace.is_public ? '公开' : '私有'}
-                </span>
               </div>
 
               {/* Stats */}
@@ -201,21 +199,21 @@ export default function WorkspacesPage() {
                 <div className="text-center">
                   <div className="flex items-center justify-center gap-1.5 text-xl font-bold text-slate-900 dark:text-white">
                     <Bot className="w-4 h-4 text-slate-400" />
-                    {workspace.active_task_count}
+                    {workspace.agent_count}
+                  </div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">智能体</div>
+                </div>
+                <div className="text-center">
+                  <div className="flex items-center justify-center gap-1.5 text-xl font-bold text-slate-900 dark:text-white">
+                    <Folder className="w-4 h-4 text-slate-400" />
+                    {workspace.task_count}
                   </div>
                   <div className="text-xs text-slate-500 dark:text-slate-400">任务</div>
                 </div>
                 <div className="text-center">
                   <div className="flex items-center justify-center gap-1.5 text-xl font-bold text-slate-900 dark:text-white">
-                    <Folder className="w-4 h-4 text-slate-400" />
-                    {workspace.document_count}
-                  </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">文档</div>
-                </div>
-                <div className="text-center">
-                  <div className="flex items-center justify-center gap-1.5 text-xl font-bold text-slate-900 dark:text-white">
                     <Users className="w-4 h-4 text-slate-400" />
-                    {workspace.permissions?.length || 0}
+                    1
                   </div>
                   <div className="text-xs text-slate-500 dark:text-slate-400">成员</div>
                 </div>
@@ -231,7 +229,7 @@ export default function WorkspacesPage() {
                   编辑
                 </button>
                 <button
-                  onClick={() => setShowDeleteConfirm(workspace.id)}
+                  onClick={() => setShowDeleteConfirm(workspace.name)}
                   className="flex-1 px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
                 >
                   删除
@@ -280,18 +278,7 @@ export default function WorkspacesPage() {
                   rows={3}
                 />
               </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="is_public"
-                  checked={formData.is_public}
-                  onChange={(e) => setFormData({ ...formData, is_public: e.target.checked })}
-                  className="w-4 h-4 rounded border-slate-300"
-                />
-                <label htmlFor="is_public" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  公开工作空间
-                </label>
-              </div>
+
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -349,18 +336,6 @@ export default function WorkspacesPage() {
                   placeholder="输入工作空间描述"
                   rows={3}
                 />
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="edit_is_public"
-                  checked={formData.is_public}
-                  onChange={(e) => setFormData({ ...formData, is_public: e.target.checked })}
-                  className="w-4 h-4 rounded border-slate-300"
-                />
-                <label htmlFor="edit_is_public" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  公开工作空间
-                </label>
               </div>
               <div className="flex gap-2">
                 <button

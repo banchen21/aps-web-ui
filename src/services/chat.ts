@@ -1,5 +1,19 @@
 const API_BASE_URL = 'http://0.0.0.0:8000/api/v1'
 
+// WebSocket 聊天端点（与 API_BASE_URL 同一主机，路径为 /ws/chat?token=<JWT>）
+export const WS_CHAT_URL = API_BASE_URL
+  .replace(/^http(s?)/, 'ws$1')
+  .replace('/api/v1', '/ws/chat')
+
+/** 服务端推送给客户端的 WS 消息结构 */
+export interface WsServerMessage {
+  type: 'thinking' | 'message' | 'task_progress' | 'error'
+  sender?: string
+  content?: string
+  created_at?: string
+  message?: string
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -56,7 +70,7 @@ const extractContent = (content: any): string => {
 
 export interface SendChatMessageRequest {
   user: string
-  content: string
+  content: string;
   device_type: string,
   created_at: string
 }
@@ -75,8 +89,6 @@ export const chatService = {
    */
   // 修改 getSessionMessages 方法
   getSessionMessages: async (before?: string, limit: number = 25) => {
-    console.log(new Date().toISOString());
-
     const params = new URLSearchParams()
     if (before) params.append('before', before)
     params.append('limit', limit.toString())
@@ -125,7 +137,7 @@ export const chatService = {
 
     const result = await response.json()
     if (!response.ok) throw new Error(result.message || '发送消息失败')
-    
+
     // 提取消息数组 - 支持多种返回格式
     let messagesArray: any[] = []
     if (Array.isArray(result)) {
@@ -142,24 +154,24 @@ export const chatService = {
     } else {
       messagesArray = [result]
     }
-    
+
     // 转换为 ChatMessage 数组
     return messagesArray.map((msg, index) => {
       // 提取内容
       const content = typeof msg.content === 'string'
         ? msg.content
         : extractContent(msg.content)
-      
+
       // 验证时间
       const rawCreatedAt = msg.created_at || new Date().toISOString()
       const createdDate = new Date(rawCreatedAt)
       const validCreatedAt = isNaN(createdDate.getTime())
         ? new Date().toISOString()
         : rawCreatedAt
-      
+
       // 提取发送者
       const sender = msg.sender || 'assistant'
-      
+
       return {
         id: `${validCreatedAt}-${sender}-${Date.now()}-${index}`,
         role: sender === request.user ? 'user' : 'assistant',

@@ -50,20 +50,17 @@ export const authService = {
           // 更新本地存储的 Access Token
           localStorage.setItem('access_token', result.access_token)
           // 如果后端返回了新的 Refresh Token，一并更新
-          if (result.refresh_token) {
-            localStorage.setItem('refresh_token', result.refresh_token)
-          }
+          localStorage.setItem('refresh_token', result.refresh_token)
         } else {
           console.warn('Token 刷新失败，正在登出...')
-          authService.logout()
-          if (window.location.pathname !== '/login') {
-            window.location.href = '/login'
-          }
+          logout()
         }
       } catch (err) {
         console.error('自动刷新异常:', err)
+        logout()
       }
     }
+
 
     // 设置定时器：5分钟 = 5 * 60 * 1000 毫秒
     refreshInterval = setInterval(performRefresh, 1 * 60 * 1000)
@@ -78,10 +75,18 @@ export const authService = {
   },
 
   // 登出
-  logout: () => {
-    authService.clearAutoRefresh()
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
-    localStorage.removeItem('aps_user')
-  },
+
+}
+
+
+function logout() {
+  authService.clearAutoRefresh()
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('refresh_token')
+  localStorage.removeItem('aps_user')
+
+  if (window.location.pathname !== '/login') {
+    console.log("跳转");
+    window.location.href = '/login'
+  }
 }

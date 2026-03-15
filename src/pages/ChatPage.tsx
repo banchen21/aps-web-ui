@@ -1,17 +1,40 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Send, MessageCircle, Loader2, RefreshCw } from 'lucide-react'
-import { chatService, ChatMessage } from '../services/chat'
+import { Send, MessageCircle, Loader2, RefreshCw, Wifi, WifiOff } from 'lucide-react'
+import { chatService, ChatMessage, WS_CHAT_URL, WsServerMessage } from '../services/chat'
 import { useToast } from '../contexts/ToastContext'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
-// 安全格式化时间
+// 安全格式化时间（本地时间）
 const formatTime = (dateString: string) => {
   try {
     const date = new Date(dateString)
     if (isNaN(date.getTime())) return '--:--'
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    // 使用中国时区显示本地时间
+    return date.toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZone: 'Asia/Shanghai'
+    })
   } catch {
     return '--:--'
   }
+}
+
+// 获取带时区的 ISO 字符串（+08:00）
+const getLocalISOString = () => {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  const hours = String(now.getHours()).padStart(2, '0')
+  const minutes = String(now.getMinutes()).padStart(2, '0')
+  const seconds = String(now.getSeconds()).padStart(2, '0')
+  const milliseconds = String(now.getMilliseconds()).padStart(3, '0')
+  
+  // 返回带 +08:00 时区的 ISO 格式
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${milliseconds}+08:00`
 }
 
 export default function ChatPage() {
@@ -25,13 +48,30 @@ export default function ChatPage() {
 
   // 输入状态
   const [messageInput, setMessageInput] = useState('')
-  const [messageLoading, setMessageLoading] = useState(false)
 
   // 引用
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const topSentinelRef = useRef<HTMLDivElement>(null) // 顶部哨兵，用于触发自动加载
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const isInitialLoad = useRef(true)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+    // WebSocket 状态
+    const [isThinking, setIsThinking] = useState(false)
+    const [wsConnected, setWsConnected] = useState(false)
+    const wsRef = useRef<WebSocket | null>(null)
+    const lastUserMsgIdRef = useRef<string | null>(null)
+    const reconnectAttemptsRef = useRef(0)
+    const doConnectRef = useRef<() => void>()
+
+  // 自动调整 textarea 高度
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (textarea) {
+      textarea.style.height = 'auto'
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`
+    }
+  }, [messageInput])
 
   // 获取当前用户信息
   const getApsUser = () => {
@@ -39,6 +79,72 @@ export default function ChatPage() {
     return userStr ? JSON.parse(userStr) : null
   }
   const aps_user = getApsUser()
+
+    // --- WebSocket 连接 ---
+    doConnectRef.current = () => {
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+
+      const ws = new WebSocket(`${WS_CHAT_URL}?token=${encodeURIComponent(token)}`)
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        setWsConnected(true)
+        reconnectAttemptsRef.current = 0
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const msg: WsServerMessage = JSON.parse(event.data)
+          if (msg.type === 'thinking') {
+            setIsThinking(true)
+          } else if (msg.type === 'message' || msg.type === 'task_progress') {
+            setIsThinking(false)
+            const aiMsg: ChatMessage = {
+              id: `ai-${Date.now()}`,
+              role: 'assistant',
+              content: msg.content ?? '',
+              created_at: msg.created_at ?? new Date().toISOString(),
+            }
+            setMessages((prev) => [...prev, aiMsg])
+            setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+          } else if (msg.type === 'error') {
+            setIsThinking(false)
+            showError(msg.message ?? '消息发送失败')
+            if (lastUserMsgIdRef.current) {
+              const failedId = lastUserMsgIdRef.current
+              setMessages((prev) =>
+                prev.map((m) => (m.id === failedId ? { ...m, status: 'error' } : m))
+              )
+            }
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+
+      ws.onerror = () => {
+        setWsConnected(false)
+      }
+
+      ws.onclose = () => {
+        setWsConnected(false)
+        setIsThinking(false)
+        // 自动重连，最多 5 次，间隔 3s
+        if (reconnectAttemptsRef.current < 5) {
+          reconnectAttemptsRef.current += 1
+          setTimeout(() => doConnectRef.current?.(), 3000)
+        }
+      }
+    }
+
+    useEffect(() => {
+      doConnectRef.current?.()
+      return () => {
+        reconnectAttemptsRef.current = 99 // 阻止重连
+        wsRef.current?.close()
+      }
+    }, [])
 
   // --- 核心逻辑：滚动锚定加载 ---
   const fetchHistory = useCallback(async () => {
@@ -55,7 +161,7 @@ export default function ChatPage() {
     try {
       // 使用当前列表最旧的一条记录作为游标
       const oldestTimestamp = messages[0].created_at
-      const olderMessages = await chatService.getSessionMessages(oldestTimestamp)
+      const olderMessages = await chatService.getSessionMessages()
 
       if (olderMessages.length === 0) {
         setHasMore(false)
@@ -120,68 +226,37 @@ export default function ChatPage() {
   }, [showError])
 
   // --- 发送消息逻辑 ---
-  const sendMessageContent = async (content: string, tempId?: string) => {
-    const msgId = tempId || `temp-user-${Date.now()}`;
-
-    // 如果没有传入 tempId，说明是新消息，需要添加到列表
-    if (!tempId) {
-      const userMsg: ChatMessage = {
-        id: msgId,
-        role: 'user',
-        content: content,
-        created_at: new Date().toISOString(),
-        status: 'sending'
-      };
-      setMessages((prev) => [...prev, userMsg]);
-      // 发送消息后立即滚动到底部
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-    } else {
-      // 重新发送，更新状态为 sending
-      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'sending' } : m));
-    }
-
-    try {
-      const response = await chatService.sendMessage({
-        user: aps_user.username,
-        content: content,
-        device_type: "web",
-        created_at: new Date().toISOString(),
-      });
-
-      // 更新用户消息为 sent
-      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'sent' } : m));
-
-      // 处理 AI 响应 - response 是消息数组
-      const newMessages = response as ChatMessage[];
-      if (newMessages && Array.isArray(newMessages)) {
-        newMessages.forEach((msg, index) => {
-          setTimeout(() => {
-            setMessages((prev) => [...prev, msg]);
-            if (index === newMessages.length - 1) {
-              setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-            }
-          }, index * 100);
-        });
-      }
-    } catch (err) {
-      showError('发送失败');
-      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'error' } : m));
-    }
-  };
-
-  const handleSendMessage = async (e: React.FormEvent) => {
+  const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!aps_user || !messageInput.trim()) return;
+    if (!aps_user || !messageInput.trim() || !wsConnected || isThinking) return;
 
     const currentInput = messageInput.trim();
-    setMessageInput(''); // 清空输入
-    await sendMessageContent(currentInput);
+    setMessageInput('')
+
+    const msgId = `temp-user-${Date.now()}`
+    lastUserMsgIdRef.current = msgId
+    const userMsg: ChatMessage = {
+      id: msgId,
+      role: 'user',
+      content: currentInput,
+      created_at: getLocalISOString(),
+      status: 'sent',
+    }
+    setMessages((prev) => [...prev, userMsg])
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+
+    wsRef.current?.send(JSON.stringify({ content: currentInput, device_type: 'web' }))
   };
 
   // 重新发送失败的消息
-  const handleRetryMessage = async (message: ChatMessage) => {
+  const handleRetryMessage = (message: ChatMessage) => {
     if (message.status !== 'error') return;
-    await sendMessageContent(message.content, message.id);
+    if (!wsConnected || isThinking) return
+    lastUserMsgIdRef.current = message.id
+    setMessages((prev) =>
+      prev.map((m) => (m.id === message.id ? { ...m, status: 'sent' } : m))
+    )
+    wsRef.current?.send(JSON.stringify({ content: message.content, device_type: 'web' }))
   };
 
   return (
@@ -191,8 +266,15 @@ export default function ChatPage() {
         <MessageCircle size={24} />
         <div>
           <h1 className="text-lg font-bold">智能助手</h1>
-          <p className="text-blue-100 text-xs opacity-80">在线历史记录已同步</p>
+            <p className="text-blue-100 text-xs opacity-80">在线历史记录已同步</p>
         </div>
+          <div className="ml-auto flex items-center gap-1.5 text-xs">
+            {wsConnected ? (
+              <><Wifi size={14} className="text-green-300" /><span className="text-green-200">已连接</span></>
+            ) : (
+              <><WifiOff size={14} className="text-red-300 animate-pulse" /><span className="text-red-200">连接中...</span></>
+            )}
+          </div>
       </div>
 
       {/* 消息展示区 */}
@@ -248,7 +330,23 @@ export default function ChatPage() {
                   }`}
               >
                 <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                  {message.content}
+                  {message.role === 'assistant' ? (
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                        ul: ({ children }) => <ul className="list-disc pl-5 mb-2 last:mb-0">{children}</ul>,
+                        ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 last:mb-0">{children}</ol>,
+                        li: ({ children }) => <li className="mb-1 last:mb-0">{children}</li>,
+                        code: ({ children }) => <code className="px-1 py-0.5 rounded bg-slate-200 dark:bg-slate-600 text-xs">{children}</code>,
+                        pre: ({ children }) => <pre className="p-2 rounded bg-slate-200 dark:bg-slate-600 overflow-x-auto text-xs">{children}</pre>,
+                      }}
+                    >
+                      {message.content}
+                    </ReactMarkdown>
+                  ) : (
+                    message.content
+                  )}
                 </div>
                 <div className={`text-[10px] mt-1 opacity-50 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
                   {message.role === 'user' && message.status === 'sending' && (
@@ -269,20 +367,26 @@ export default function ChatPage() {
       {/* 输入区域 */}
       <div className="p-4 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
         <form onSubmit={handleSendMessage} className="flex gap-2">
-          <input
-            type="text"
+          <textarea
+            ref={textareaRef}
             value={messageInput}
             onChange={(e) => setMessageInput(e.target.value)}
-            placeholder={messageLoading ? "对方正在思考..." : "输入消息..."}
-            disabled={messageLoading}
-            className="flex-1 px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60 transition-all"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSendMessage(e);
+              }
+            }}
+            placeholder={isThinking ? "对方正在思考..." : !wsConnected ? "正在连接服务器..." : "输入消息... (Enter 发送, Shift+Enter 换行)"}
+            disabled={isThinking || !wsConnected}
+            className="flex-1 px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60 transition-all resize-none min-h-[40px] max-h-[120px]"
           />
           <button
             type="submit"
-            disabled={messageLoading || !messageInput.trim()}
+              disabled={isThinking || !wsConnected || !messageInput.trim()}
             className="p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center justify-center w-12"
           >
-            {messageLoading ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
+            {isThinking ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
           </button>
         </form>
       </div>

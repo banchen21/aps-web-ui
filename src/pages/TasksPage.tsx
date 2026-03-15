@@ -1,25 +1,7 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Plus, Search, Filter, MoreVertical, CheckCircle, Clock, XCircle, Loader } from 'lucide-react'
-
-interface Task {
-  id: number
-  name: string
-  type: string
-  status: 'completed' | 'running' | 'pending' | 'failed'
-  agent: string
-  createdAt: string
-}
-
-const tasks: Task[] = [
-  { id: 2341, name: '数据分析任务', type: '数据处理', status: 'completed', agent: 'GPT-4 Assistant', createdAt: '2024-01-15 14:30' },
-  { id: 2342, name: '文档生成', type: '文本生成', status: 'running', agent: 'Claude Assistant', createdAt: '2024-01-15 14:45' },
-  { id: 2343, name: '代码审查', type: '代码分析', status: 'pending', agent: 'Auto Agent', createdAt: '2024-01-15 15:00' },
-  { id: 2344, name: '图像识别', type: '多模态', status: 'completed', agent: 'Data Analyzer', createdAt: '2024-01-15 13:20' },
-  { id: 2345, name: 'API 调用测试', type: '系统测试', status: 'failed', agent: 'GPT-4 Assistant', createdAt: '2024-01-15 12:15' },
-  { id: 2346, name: '数据清洗', type: '数据处理', status: 'completed', agent: 'Auto Agent', createdAt: '2024-01-15 11:30' },
-  { id: 2347, name: '翻译任务', type: '文本生成', status: 'running', agent: 'Claude Assistant', createdAt: '2024-01-15 10:45' },
-  { id: 2348, name: '模型微调', type: '机器学习', status: 'pending', agent: 'Data Analyzer', createdAt: '2024-01-15 09:20' },
-]
+import { taskService, TaskItem, TaskStatusGroup } from '../services/task'
+import { useToast } from '../contexts/ToastContext'
 
 const statusConfig = {
   completed: { label: '已完成', class: 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-400', icon: CheckCircle },
@@ -29,8 +11,86 @@ const statusConfig = {
 }
 
 export default function TasksPage() {
-  const [activeTab, setActiveTab] = useState('all')
+  const AUTO_REFRESH_MS = 5000
+  const { showSuccess, showError } = useToast()
+  const [activeTab, setActiveTab] = useState<'all' | TaskStatusGroup>('all')
   const [searchTerm, setSearchTerm] = useState('')
+  const [tasks, setTasks] = useState<TaskItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null)
+  const [createForm, setCreateForm] = useState({
+    name: '',
+    description: '',
+    priority: 'medium' as 'low' | 'medium' | 'high' | 'critical',
+  })
+
+  const fetchTasks = useCallback(async (silent = false) => {
+    try {
+      if (silent) {
+        setIsAutoRefreshing(true)
+      } else {
+        setLoading(true)
+      }
+      const data = await taskService.getTasks()
+      setTasks(data)
+      setSelectedTask((prev) => {
+        if (!prev) return null
+        return data.find((item) => item.id === prev.id) ?? null
+      })
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '获取任务列表失败')
+    } finally {
+      if (silent) {
+        setIsAutoRefreshing(false)
+      } else {
+        setLoading(false)
+      }
+    }
+  }, [showError])
+
+  useEffect(() => {
+    void fetchTasks()
+  }, [fetchTasks])
+
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void fetchTasks(true)
+      }
+    }
+
+    const intervalId = window.setInterval(refreshIfVisible, AUTO_REFRESH_MS)
+    document.addEventListener('visibilitychange', refreshIfVisible)
+
+    return () => {
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', refreshIfVisible)
+    }
+  }, [fetchTasks])
+
+  const handleCreateTask = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!createForm.name.trim()) {
+      showError('请填写任务名称')
+      return
+    }
+
+    try {
+      await taskService.createTask({
+        name: createForm.name,
+        description: createForm.description,
+        priority: createForm.priority,
+      })
+      showSuccess('任务创建成功')
+      setShowCreateModal(false)
+      setCreateForm({ name: '', description: '', priority: 'medium' })
+      await fetchTasks(true)
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '创建任务失败')
+    }
+  }
 
   const tabs = [
     { id: 'all', label: '全部' },
@@ -40,10 +100,19 @@ export default function TasksPage() {
   ]
 
   const filteredTasks = tasks.filter(task => {
-    if (activeTab !== 'all' && task.status !== activeTab) return false
+    if (activeTab !== 'all' && task.status_group !== activeTab) return false
     if (searchTerm && !task.name.toLowerCase().includes(searchTerm.toLowerCase())) return false
     return true
   })
+
+  const formatTime = (value: string) => new Date(value).toLocaleString('zh-CN')
+
+  const getTaskType = (task: TaskItem) => {
+    if (task.priority === 'critical') return '紧急任务'
+    if (task.priority === 'high') return '高优先级'
+    if (task.priority === 'low') return '低优先级'
+    return '常规任务'
+  }
 
   return (
     <div className="space-y-6">
@@ -53,10 +122,19 @@ export default function TasksPage() {
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">任务管理</h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1">查看和管理所有任务</p>
         </div>
-        <button className="px-4 py-2 bg-violet-500 text-white rounded-lg hover:bg-violet-600 transition-colors flex items-center gap-2">
-          <Plus className="w-4 h-4" />
-          创建任务
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+            <Loader className={`w-3.5 h-3.5 ${isAutoRefreshing ? 'animate-spin text-violet-500' : ''}`} />
+            {isAutoRefreshing ? '自动同步中...' : '每 5 秒自动刷新'}
+          </div>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="px-4 py-2 bg-violet-500 text-white rounded-lg hover:bg-violet-600 transition-colors flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            创建任务
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -97,6 +175,9 @@ export default function TasksPage() {
       {/* Tasks Table */}
       <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
         <div className="overflow-x-auto">
+          {loading ? (
+            <div className="p-8 text-center text-slate-500 dark:text-slate-400">加载中...</div>
+          ) : (
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-700">
@@ -111,22 +192,25 @@ export default function TasksPage() {
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
               {filteredTasks.map((task) => {
-                const StatusIcon = statusConfig[task.status].icon
+                const StatusIcon = statusConfig[task.status_group].icon
                 return (
                   <tr key={task.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                    <td className="px-6 py-4 text-sm font-medium text-slate-900 dark:text-white">#{task.id}</td>
+                    <td className="px-6 py-4 text-sm font-medium text-slate-900 dark:text-white">#{task.id.slice(0, 8)}</td>
                     <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">{task.name}</td>
-                    <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400">{task.type}</td>
+                    <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400">{getTaskType(task)}</td>
                     <td className="px-6 py-4">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${statusConfig[task.status].class}`}>
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${statusConfig[task.status_group].class}`}>
                         <StatusIcon className="w-3.5 h-3.5" />
-                        {statusConfig[task.status].label}
+                        {task.status_label}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">{task.agent}</td>
-                    <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400">{task.createdAt}</td>
+                    <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">{task.assigned_agent_name || '未分配'}</td>
+                    <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400">{formatTime(task.created_at)}</td>
                     <td className="px-6 py-4">
-                      <button className="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
+                      <button
+                        onClick={() => setSelectedTask(task)}
+                        className="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                      >
                         详情
                       </button>
                     </td>
@@ -135,8 +219,73 @@ export default function TasksPage() {
               })}
             </tbody>
           </table>
+          )}
         </div>
       </div>
+
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-xl max-w-lg w-full p-6">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">创建任务</h2>
+            <form onSubmit={handleCreateTask} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">任务名称 *</label>
+                <input
+                  value={createForm.name}
+                  onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">优先级</label>
+                <select
+                  value={createForm.priority}
+                  onChange={(e) => setCreateForm({ ...createForm, priority: e.target.value as any })}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                >
+                  <option value="low">低</option>
+                  <option value="medium">中</option>
+                  <option value="high">高</option>
+                  <option value="critical">紧急</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">任务描述</label>
+                <textarea
+                  value={createForm.description}
+                  onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
+                  rows={4}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setShowCreateModal(false)} className="flex-1 px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">取消</button>
+                <button type="submit" className="flex-1 px-4 py-2 bg-violet-500 text-white rounded-lg hover:bg-violet-600">创建</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {selectedTask && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-xl max-w-lg w-full p-6">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">任务详情</h2>
+            <div className="space-y-3 text-sm">
+              <div><span className="text-slate-500 dark:text-slate-400">任务 ID：</span><span className="text-slate-900 dark:text-white">{selectedTask.id}</span></div>
+              <div><span className="text-slate-500 dark:text-slate-400">名称：</span><span className="text-slate-900 dark:text-white">{selectedTask.name}</span></div>
+              <div><span className="text-slate-500 dark:text-slate-400">状态：</span><span className="text-slate-900 dark:text-white">{selectedTask.status_label}</span></div>
+              <div><span className="text-slate-500 dark:text-slate-400">执行智能体：</span><span className="text-slate-900 dark:text-white">{selectedTask.assigned_agent_name || '未分配'}</span></div>
+              <div><span className="text-slate-500 dark:text-slate-400">创建时间：</span><span className="text-slate-900 dark:text-white">{formatTime(selectedTask.created_at)}</span></div>
+              <div>
+                <p className="text-slate-500 dark:text-slate-400 mb-1">描述</p>
+                <p className="text-slate-900 dark:text-white whitespace-pre-wrap">{selectedTask.description || '无描述'}</p>
+              </div>
+            </div>
+            <button onClick={() => setSelectedTask(null)} className="w-full mt-6 px-4 py-2 bg-violet-500 text-white rounded-lg hover:bg-violet-600">关闭</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
