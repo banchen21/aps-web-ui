@@ -7,6 +7,7 @@ import { useToast } from '../contexts/ToastContext'
 type AgentWithStatus = Agent & {
   owner_username: string
   mcp_list: string[]
+  // 前端使用三态展示，这里保持旧有三态类型但会把后端生命周期映射为这三态
   status: 'online' | 'working' | 'idle'
   status_label: string
 }
@@ -44,13 +45,33 @@ export default function AgentsPage() {
     try {
       setLoading(true)
       const agentList = await agentService.getAgents()
-      const mergedAgents: AgentWithStatus[] = agentList.map((agent) => ({
-        ...agent,
-        owner_username: agent.owner_username || '',
-        mcp_list: agent.mcp_list || [],
-        status: 'idle',
-        status_label: '空闲',
-      }))
+      const mapStatus = (backendStatus?: string) => {
+        // backend: starting/running/stopping/stopped/unknown
+        switch (backendStatus) {
+          case 'starting':
+            return { status: 'online' as const, label: '启动中' }
+          case 'running':
+            // running 表示正在运行或可用，映射为 working
+            return { status: 'working' as const, label: '运行中' }
+          case 'stopping':
+            return { status: 'online' as const, label: '停止中' }
+          case 'stopped':
+            return { status: 'idle' as const, label: '已停止' }
+          default:
+            return { status: 'idle' as const, label: '未知' }
+        }
+      }
+
+      const mergedAgents: AgentWithStatus[] = agentList.map((agent) => {
+        const ms = mapStatus((agent as any).status)
+        return {
+          ...agent,
+          owner_username: agent.owner_username || '',
+          mcp_list: agent.mcp_list || [],
+          status: ms.status,
+          status_label: ms.label,
+        }
+      })
 
       setAgents(mergedAgents)
     } catch (err) {
