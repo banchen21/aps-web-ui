@@ -16,8 +16,7 @@ import {
   LogOut,
   ChevronRight,
   MessageCircle,
-  Brain,
-  Plug
+  Brain
 } from 'lucide-react'
 
 // Import pages
@@ -31,7 +30,6 @@ import LogsPage from './pages/LogsPage'
 import APIDocsPage from './pages/APIDocsPage'
 import ChatPage from './pages/ChatPage'
 import MemoryPage from './pages/MemoryPage'
-import MCPPage from './pages/MCPPage'
 
 // Import auth service
 import { authService } from './services/auth'
@@ -49,7 +47,6 @@ const navItems = [
   { path: '/tasks', label: '任务管理', icon: ListTodo },
   { path: '/workspaces', label: '工作空间', icon: FolderKanban },
   { path: '/memory', label: '记忆库', icon: Brain },
-  { path: '/mcp', label: 'MCP 服务器', icon: Plug },
   { path: '/logs', label: '日志控制台', icon: Terminal },
   { path: '/api-docs', label: 'API 文档', icon: BookOpen },
 ]
@@ -177,7 +174,6 @@ function AppLayout() {
               <Route path="/tasks" element={<TasksPage />} />
               <Route path="/workspaces" element={<WorkspacesPage />} />
               <Route path="/memory" element={<MemoryPage />} />
-              <Route path="/mcp" element={<MCPPage />} />
               <Route path="/logs" element={<LogsPage />} />
               <Route path="/api-docs" element={<APIDocsPage />} />
               <Route path="/" element={<Navigate to="/chat" replace />} />

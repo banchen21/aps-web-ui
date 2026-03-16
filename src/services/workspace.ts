@@ -5,6 +5,7 @@ export interface Workspace {
   name: string
   description?: string
   owner_username: string
+  status: string
   created_at: string
 }
 

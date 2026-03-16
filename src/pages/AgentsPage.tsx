@@ -43,22 +43,14 @@ export default function AgentsPage() {
   const fetchAgents = async () => {
     try {
       setLoading(true)
-      const [agentList, statusList] = await Promise.all([
-        agentService.getAgents(),
-        agentService.getAgentStatuses(),
-      ])
-
-      const statusMap = new Map(statusList.map((item) => [item.agent_id, item]))
-      const mergedAgents: AgentWithStatus[] = agentList.map((agent) => {
-        const statusInfo = statusMap.get(agent.id)
-        return {
-          ...agent,
-          owner_username: agent.owner_username || '',
-          mcp_list: agent.mcp_list || [],
-          status: statusInfo?.status || 'idle',
-          status_label: statusInfo?.status_label || '空闲',
-        }
-      })
+      const agentList = await agentService.getAgents()
+      const mergedAgents: AgentWithStatus[] = agentList.map((agent) => ({
+        ...agent,
+        owner_username: agent.owner_username || '',
+        mcp_list: agent.mcp_list || [],
+        status: 'idle',
+        status_label: '空闲',
+      }))
 
       setAgents(mergedAgents)
     } catch (err) {

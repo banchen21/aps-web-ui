@@ -192,14 +192,15 @@ export default function TasksPage() {
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
               {filteredTasks.map((task) => {
-                const StatusIcon = statusConfig[task.status_group].icon
+                const statusCfg = statusConfig[task.status_group] ?? statusConfig['pending']
+                const StatusIcon = statusCfg.icon
                 return (
                   <tr key={task.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
                     <td className="px-6 py-4 text-sm font-medium text-slate-900 dark:text-white">#{task.id.slice(0, 8)}</td>
                     <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">{task.name}</td>
                     <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400">{getTaskType(task)}</td>
                     <td className="px-6 py-4">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${statusConfig[task.status_group].class}`}>
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${statusCfg.class}`}>
                         <StatusIcon className="w-3.5 h-3.5" />
                         {task.status_label}
                       </span>

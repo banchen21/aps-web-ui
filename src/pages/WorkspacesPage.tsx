@@ -189,7 +189,10 @@ export default function WorkspacesPage() {
                   </div>
                   <div>
                     <h3 className="font-semibold text-slate-900 dark:text-white">{workspace.name}</h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">{workspace.description || '无描述'}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-slate-500 dark:text-slate-400">{workspace.description || '无描述'}</p>
+                      <span className="text-xs px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200">{workspace.status}</span>
+                    </div>
                   </div>
                 </div>
               </div>
