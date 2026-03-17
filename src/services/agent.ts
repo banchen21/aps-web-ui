@@ -4,6 +4,8 @@ export interface Agent {
   id: string
   name: string
   kind: 'general' | 'code' | 'research' | 'custom'
+  provider?: string
+  model?: string
   workspace_name: string
   owner_username?: string
   mcp_list?: string[]
@@ -50,12 +52,34 @@ export interface RegisterAgentRequest {
   user_name: string
   name: string
   kind: 'general' | 'code' | 'research' | 'custom'
+  provider: string
+  model: string
   workspace_name: string
   description?: string
   capabilities?: Capability[]
   endpoints?: AgentEndpoints
   limits?: AgentLimits
   metadata?: Record<string, any>
+}
+
+export interface ProviderModelOption {
+  provider: string
+  default_model: string
+  base_url?: string
+  has_token?: boolean
+  recommended_models: string[]
+}
+
+export interface ProviderModelOptionsResponse {
+  default_provider: string
+  providers: ProviderModelOption[]
+}
+
+export interface SaveProviderConfigRequest {
+  provider: string
+  model: string
+  token: string
+  base_url?: string
 }
 
 export interface UpdateAgentStatusRequest {
@@ -134,6 +158,26 @@ export const agentService = {
     return await response.json()
   },
 
+  // 获取可选代理商与模型（来自后端配置）
+  getProviderModelOptions: async (): Promise<ProviderModelOptionsResponse> => {
+    const response = await fetch(`${API_BASE_URL}/agent/provider-options`, {
+      method: 'GET',
+      headers: getAuthHeader(),
+    })
+    if (!response.ok) throw new Error('获取代理商与模型选项失败')
+    return await response.json()
+  },
+
+  saveProviderModelOptions: async (request: SaveProviderConfigRequest) => {
+    const response = await fetch(`${API_BASE_URL}/agent/provider-options`, {
+      method: 'POST',
+      headers: getAuthHeader(),
+      body: JSON.stringify(request),
+    })
+    if (!response.ok) throw new Error('保存代理商配置失败')
+    return await response.json()
+  },
+
   // 更新智能体状态
   updateAgentStatus: async (agentId: string, request: UpdateAgentStatusRequest) => {
     const response = await fetch(`${API_BASE_URL}/agent/${agentId}/status`, {
@@ -185,6 +229,26 @@ export const agentService = {
       headers: getAuthHeader(),
     })
     if (!response.ok) throw new Error('删除智能体失败')
+    return await response.json()
+  },
+
+  // 启动智能体
+  startAgent: async (agentId: string) => {
+    const response = await fetch(`${API_BASE_URL}/agent/${agentId}/start`, {
+      method: 'POST',
+      headers: getAuthHeader(),
+    })
+    if (!response.ok) throw new Error('启动智能体失败')
+    return await response.json()
+  },
+
+  // 停止智能体
+  stopAgent: async (agentId: string) => {
+    const response = await fetch(`${API_BASE_URL}/agent/${agentId}/stop`, {
+      method: 'POST',
+      headers: getAuthHeader(),
+    })
+    if (!response.ok) throw new Error('停止智能体失败')
     return await response.json()
   },
 

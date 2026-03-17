@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react'
-import { Bot, Plus, Eye, Trash2 } from 'lucide-react'
-import { Agent, agentService, RegisterAgentRequest } from '../services/agent'
+import { Bot, Plus, Eye, Trash2, Play, Square, Loader2 } from 'lucide-react'
+import {
+  Agent,
+  agentService,
+  ProviderModelOption,
+  RegisterAgentRequest,
+} from '../services/agent'
 import { workspaceService, WorkspaceResponse } from '../services/workspace'
 import { useToast } from '../contexts/ToastContext'
 
@@ -28,10 +33,15 @@ export default function AgentsPage() {
   const [showDetailModal, setShowDetailModal] = useState(false)
   const [selectedAgent, setSelectedAgent] = useState<AgentWithStatus | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  const [providerOptions, setProviderOptions] = useState<ProviderModelOption[]>([])
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null)
 
   const [registerForm, setRegisterForm] = useState({
     name: '',
     kind: 'general' as 'general' | 'code' | 'research' | 'custom',
+    provider: 'default',
+    model: '',
+    custom_model: '',
     workspace_name: '',
     // 移除 description，因为后端表结构中没有这个字段
   })
@@ -39,7 +49,33 @@ export default function AgentsPage() {
   useEffect(() => {
     fetchAgents()
     fetchWorkspaces()
+    fetchProviderOptions()
   }, [])
+
+  const fetchProviderOptions = async () => {
+    try {
+      const data = await agentService.getProviderModelOptions()
+      const options = data.providers || []
+      setProviderOptions(options)
+
+      if (options.length > 0) {
+        const defaultProvider =
+          data.default_provider || options[0].provider || 'default'
+        const defaultModel =
+          options.find((p) => p.provider === defaultProvider)?.default_model ||
+          options[0].default_model ||
+          ''
+
+        setRegisterForm((prev) => ({
+          ...prev,
+          provider: prev.provider || defaultProvider,
+          model: prev.model || defaultModel,
+        }))
+      }
+    } catch (err) {
+      console.error('获取代理商模型配置失败:', err)
+    }
+  }
 
   const fetchAgents = async () => {
     try {
@@ -102,10 +138,25 @@ export default function AgentsPage() {
 
   const aps_user = getApsUser()
 
+  const getModelOptions = (provider: string) => {
+    const target = providerOptions.find((p) => p.provider === provider)
+    if (!target) return []
+    const set = new Set<string>([target.default_model, ...(target.recommended_models || [])])
+    return Array.from(set).filter(Boolean)
+  }
+
   const handleRegisterAgent = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!registerForm.name || !registerForm.workspace_name) {
       showError('请填写智能体名称和工作空间')
+      return
+    }
+
+    const model = registerForm.model === '__custom__'
+      ? registerForm.custom_model.trim()
+      : registerForm.model.trim()
+    if (!model) {
+      showError('请选择或输入模型')
       return
     }
 
@@ -114,6 +165,8 @@ export default function AgentsPage() {
         user_name: aps_user.username,
         name: registerForm.name,
         kind: registerForm.kind,
+        provider: registerForm.provider,
+        model,
         workspace_name: registerForm.workspace_name,
         // description 移除
       }
@@ -123,6 +176,9 @@ export default function AgentsPage() {
       setRegisterForm({
         name: '',
         kind: 'general',
+        provider: 'default',
+        model: '',
+        custom_model: '',
         workspace_name: '',
       })
       setShowRegisterModal(false)
@@ -148,6 +204,32 @@ export default function AgentsPage() {
   const handleViewDetail = (agent: AgentWithStatus) => {
     setSelectedAgent(agent)
     setShowDetailModal(true)
+  }
+
+  const handleStartAgent = async (agentId: string) => {
+    try {
+      setActionLoadingId(agentId)
+      await agentService.startAgent(agentId)
+      showSuccess('智能体启动指令已发送')
+      await fetchAgents()
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '启动智能体失败')
+    } finally {
+      setActionLoadingId(null)
+    }
+  }
+
+  const handleStopAgent = async (agentId: string) => {
+    try {
+      setActionLoadingId(agentId)
+      await agentService.stopAgent(agentId)
+      showSuccess('智能体停止指令已发送')
+      await fetchAgents()
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '停止智能体失败')
+    } finally {
+      setActionLoadingId(null)
+    }
   }
 
   const statusConfig: Record<AgentWithStatus['status'], string> = {
@@ -246,7 +328,7 @@ export default function AgentsPage() {
               </div>
 
               {/* Actions */}
-              <div className="flex gap-2 mt-4">
+              <div className="grid grid-cols-2 gap-2 mt-4">
                 <button
                   onClick={() => handleViewDetail(agent)}
                   className="flex-1 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors flex items-center justify-center gap-2"
@@ -254,12 +336,52 @@ export default function AgentsPage() {
                   <Eye className="w-4 h-4" />
                   详情
                 </button>
-                {/* 移除了状态切换按钮 */}
+                {agent.status_label === '已停止' ? (
+                  <button
+                    onClick={() => handleStartAgent(agent.id)}
+                    disabled={actionLoadingId === agent.id}
+                    className="px-3 py-2 text-sm font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/20 rounded-lg hover:bg-emerald-200 dark:hover:bg-emerald-900/40 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+                  >
+                    {actionLoadingId === agent.id ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        处理中
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4" />
+                        启动
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleStopAgent(agent.id)}
+                    disabled={actionLoadingId === agent.id}
+                    className="px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/20 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/40 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+                  >
+                    {actionLoadingId === agent.id ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        处理中
+                      </>
+                    ) : (
+                      <>
+                        <Square className="w-4 h-4" />
+                        停止
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+
+              <div className="flex gap-2 mt-2">
                 <button
                   onClick={() => setDeleteConfirm(agent.id)}
-                  className="px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/20 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/40 transition-colors flex items-center justify-center gap-2"
+                  className="w-full px-3 py-2 text-sm font-medium text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/20 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/40 transition-colors flex items-center justify-center gap-2"
                 >
                   <Trash2 className="w-4 h-4" />
+                  删除
                 </button>
               </div>
             </div>
@@ -300,6 +422,68 @@ export default function AgentsPage() {
                   <option value="research">研究</option>
                   <option value="custom">自定义</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  代理商 *
+                </label>
+                <select
+                  value={registerForm.provider}
+                  onChange={(e) => {
+                    const nextProvider = e.target.value
+                    const candidates = getModelOptions(nextProvider)
+                    setRegisterForm({
+                      ...registerForm,
+                      provider: nextProvider,
+                      model: candidates[0] || '',
+                      custom_model: '',
+                    })
+                  }}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+                >
+                  {providerOptions.length === 0 ? (
+                    <option value="default">default</option>
+                  ) : (
+                    providerOptions.map((p) => (
+                      <option key={p.provider} value={p.provider}>
+                        {p.provider}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  模型
+                </label>
+                <select
+                  value={registerForm.model}
+                  onChange={(e) =>
+                    setRegisterForm({
+                      ...registerForm,
+                      model: e.target.value,
+                      custom_model: e.target.value === '__custom__' ? registerForm.custom_model : '',
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+                >
+                  <option value="">请选择模型</option>
+                  {getModelOptions(registerForm.provider).map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                  <option value="__custom__">自定义输入...</option>
+                </select>
+                {registerForm.model === '__custom__' && (
+                  <input
+                    type="text"
+                    value={registerForm.custom_model}
+                    onChange={(e) => setRegisterForm({ ...registerForm, custom_model: e.target.value })}
+                    className="mt-2 w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    placeholder="输入自定义模型名，例如：gemini-2.0-flash"
+                  />
+                )}
               </div>
 
               <div>
@@ -361,6 +545,13 @@ export default function AgentsPage() {
               <div>
                 <p className="text-sm text-slate-600 dark:text-slate-400">工作空间</p>
                 <p className="text-slate-900 dark:text-white font-semibold">{selectedAgent.workspace_name}</p>
+              </div>
+
+              <div>
+                <p className="text-sm text-slate-600 dark:text-slate-400">代理商 / 模型</p>
+                <p className="text-slate-900 dark:text-white font-semibold">
+                  {(selectedAgent.provider || 'default') + (selectedAgent.model ? ` / ${selectedAgent.model}` : '')}
+                </p>
               </div>
 
               <div>
