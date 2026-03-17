@@ -165,7 +165,7 @@ function AppLayout() {
           </header>
 
           {/* Page content */}
-          <main className="flex-1 overflow-hidden p-6">
+          <main className="flex-1 overflow-y-auto p-6">
             <Routes>
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/dashboard" element={<DashboardPage />} />

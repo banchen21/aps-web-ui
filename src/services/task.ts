@@ -99,4 +99,15 @@ export const taskService = {
     }
     return await response.json()
   },
+
+  deleteTask: async (taskId: string): Promise<void> => {
+    const response = await fetch(`${API_BASE_URL}/tasks/${taskId}`, {
+      method: 'DELETE',
+      headers: getAuthHeader(),
+    })
+    if (!response.ok) {
+      const message = await response.text()
+      throw new Error(message || '删除任务失败')
+    }
+  },
 }

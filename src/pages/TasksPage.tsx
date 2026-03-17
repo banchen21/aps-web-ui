@@ -28,6 +28,7 @@ export default function TasksPage() {
   const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null)
   const [isDetailLoading, setIsDetailLoading] = useState(false)
   const [isDecisionSubmitting, setIsDecisionSubmitting] = useState(false)
+  const [isDeletingTask, setIsDeletingTask] = useState(false)
   const [createForm, setCreateForm] = useState({
     name: '',
     description: '',
@@ -107,7 +108,7 @@ export default function TasksPage() {
     }
   }
 
-  const tabs = [
+  const tabs: Array<{ id: 'all' | TaskStatusGroup; label: string }> = [
     { id: 'all', label: '全部' },
     { id: 'running', label: '进行中' },
     { id: 'completed', label: '已完成' },
@@ -168,6 +169,22 @@ export default function TasksPage() {
       showError(err instanceof Error ? err.message : '处理审阅决策失败')
     } finally {
       setIsDecisionSubmitting(false)
+    }
+  }, [fetchTasks, selectedTask, showError, showSuccess])
+
+  const handleDeleteTask = useCallback(async () => {
+    if (!selectedTask) return
+
+    setIsDeletingTask(true)
+    try {
+      await taskService.deleteTask(selectedTask.id)
+      showSuccess('任务已删除')
+      setSelectedTask(null)
+      await fetchTasks(true)
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '删除任务失败')
+    } finally {
+      setIsDeletingTask(false)
     }
   }, [fetchTasks, selectedTask, showError, showSuccess])
 
@@ -387,6 +404,15 @@ export default function TasksPage() {
                         {isDecisionSubmitting ? '处理中...' : '接收审阅'}
                       </button>
                     </>
+                  )}
+                  {(selectedTask.status === 'completed_success' || selectedTask.status === 'completed_failure') && (
+                    <button
+                      onClick={() => void handleDeleteTask()}
+                      disabled={isDeletingTask}
+                      className="flex-1 px-4 py-2 bg-rose-500 text-white rounded-lg hover:bg-rose-600 disabled:opacity-60"
+                    >
+                      {isDeletingTask ? '删除中...' : '删除任务'}
+                    </button>
                   )}
                   <button onClick={() => setSelectedTask(null)} className="flex-1 px-4 py-2 bg-violet-500 text-white rounded-lg hover:bg-violet-600">关闭</button>
                 </div>
