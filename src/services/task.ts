@@ -7,7 +7,7 @@ export type TaskStatus =
   | 'accepted'
   | 'executing'
   | 'submitted'
-  | 'reviewing'
+  | 'under_review'
   | 'completed_success'
   | 'completed_failure'
   | 'cancelled'
@@ -23,8 +23,14 @@ export interface TaskItem {
   due_date?: string | null
   assigned_agent_id?: string | null
   assigned_agent_name?: string | null
+  review_result?: string | null
+  review_approved?: boolean | null
   created_at: string
   updated_at: string
+}
+
+export interface ReviewDecisionRequest {
+  accept: boolean
 }
 
 export interface CreateTaskRequest {
@@ -65,6 +71,32 @@ export const taskService = {
       body: JSON.stringify(request),
     })
     if (!response.ok) throw new Error('创建任务失败')
+    if (response.status === 202 || response.status === 204) {
+      return {
+        id: '',
+        name: request.name,
+        description: request.description,
+        priority: request.priority ?? 'medium',
+        status: 'published',
+        status_label: '等待中',
+        status_group: 'pending',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+    }
+    return await response.json()
+  },
+
+  decideTaskReview: async (taskId: string, request: ReviewDecisionRequest): Promise<TaskItem> => {
+    const response = await fetch(`${API_BASE_URL}/tasks/${taskId}/review-decision`, {
+      method: 'POST',
+      headers: getAuthHeader(),
+      body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+      const message = await response.text()
+      throw new Error(message || '处理审阅决策失败')
+    }
     return await response.json()
   },
 }

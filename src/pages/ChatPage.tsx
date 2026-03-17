@@ -228,7 +228,7 @@ export default function ChatPage() {
   // --- 发送消息逻辑 ---
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!aps_user || !messageInput.trim() || !wsConnected || isThinking) return;
+    if (!aps_user || !messageInput.trim() || !wsConnected) return;
 
     const currentInput = messageInput.trim();
     setMessageInput('')
@@ -251,7 +251,7 @@ export default function ChatPage() {
   // 重新发送失败的消息
   const handleRetryMessage = (message: ChatMessage) => {
     if (message.status !== 'error') return;
-    if (!wsConnected || isThinking) return
+    if (!wsConnected) return
     lastUserMsgIdRef.current = message.id
     setMessages((prev) =>
       prev.map((m) => (m.id === message.id ? { ...m, status: 'sent' } : m))
@@ -377,18 +377,23 @@ export default function ChatPage() {
                 handleSendMessage(e);
               }
             }}
-            placeholder={isThinking ? "对方正在思考..." : !wsConnected ? "正在连接服务器..." : "输入消息... (Enter 发送, Shift+Enter 换行)"}
-            disabled={isThinking || !wsConnected}
+            placeholder={!wsConnected ? "正在连接服务器..." : "输入消息... (Enter 发送, Shift+Enter 换行)"}
+            disabled={!wsConnected}
             className="flex-1 px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60 transition-all resize-none min-h-[40px] max-h-[120px]"
           />
           <button
             type="submit"
-              disabled={isThinking || !wsConnected || !messageInput.trim()}
+              disabled={!wsConnected || !messageInput.trim()}
             className="p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center justify-center w-12"
           >
-            {isThinking ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
+            <Send size={20} />
           </button>
         </form>
+        {isThinking && (
+          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            助手正在回复中，你可以继续输入并发送下一条消息。
+          </div>
+        )}
       </div>
     </div>
   )

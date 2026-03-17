@@ -46,12 +46,14 @@ export default function AgentsPage() {
       setLoading(true)
       const agentList = await agentService.getAgents()
       const mapStatus = (backendStatus?: string) => {
-        // backend: starting/running/stopping/stopped/unknown
         switch (backendStatus) {
           case 'starting':
             return { status: 'online' as const, label: '启动中' }
+          case 'working':
+            return { status: 'working' as const, label: '执行中' }
+          case 'idle':
+            return { status: 'idle' as const, label: '空闲中' }
           case 'running':
-            // running 表示正在运行或可用，映射为 working
             return { status: 'working' as const, label: '运行中' }
           case 'stopping':
             return { status: 'online' as const, label: '停止中' }

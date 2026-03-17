@@ -1,67 +1,82 @@
 import { useState, useEffect, useRef } from 'react'
 import { Trash2, Download, Pause, Play, Search, Info, AlertTriangle, XCircle, CheckCircle } from 'lucide-react'
 
+const SSE_URL = 'http://0.0.0.0:8000/logs/stream'
+
 interface LogEntry {
   id: number
   time: string
-  level: 'info' | 'warn' | 'error' | 'success'
+  level: 'info' | 'warn' | 'error' | 'success' | 'debug'
   message: string
 }
-
-const initialLogs: LogEntry[] = [
-  { id: 1, time: '14:30:01', level: 'info', message: '系统启动完成，正在初始化服务...' },
-  { id: 2, time: '14:30:02', level: 'success', message: '数据库连接成功 (PostgreSQL:5432)' },
-  { id: 3, time: '14:30:02', level: 'success', message: 'Redis 连接成功 (localhost:6379)' },
-  { id: 4, time: '14:30:03', level: 'info', message: '加载智能体配置: 24 个智能体已注册' },
-  { id: 5, time: '14:30:05', level: 'info', message: 'API 服务启动成功 (0.0.0.0:8000)' },
-  { id: 6, time: '14:31:12', level: 'info', message: '收到新任务请求: Task #2341' },
-  { id: 7, time: '14:31:13', level: 'info', message: '任务分配给 Agent: GPT-4 Assistant' },
-  { id: 8, time: '14:31:45', level: 'success', message: '任务 #2341 执行完成，耗时: 32s' },
-  { id: 9, time: '14:32:20', level: 'warn', message: '检测到系统负载较高 (CPU: 85%)' },
-  { id: 10, time: '14:32:45', level: 'info', message: '自动扩展 worker 节点: 2 -> 3' },
-]
 
 const levelConfig = {
   info: { icon: Info, class: 'text-blue-500', bgClass: 'bg-blue-500/10' },
   warn: { icon: AlertTriangle, class: 'text-yellow-500', bgClass: 'bg-yellow-500/10' },
   error: { icon: XCircle, class: 'text-red-500', bgClass: 'bg-red-500/10' },
   success: { icon: CheckCircle, class: 'text-green-500', bgClass: 'bg-green-500/10' },
+  debug: { icon: Info, class: 'text-slate-400', bgClass: 'bg-slate-500/10' },
+}
+
+type BackendLevel = 'info' | 'warn' | 'error' | 'debug' | 'trace'
+
+function mapLevel(level: BackendLevel): LogEntry['level'] {
+  if (level === 'warn') return 'warn'
+  if (level === 'error') return 'error'
+  if (level === 'debug' || level === 'trace') return 'debug'
+  return 'info'
 }
 
 export default function LogsPage() {
-  const [logs, setLogs] = useState<LogEntry[]>(initialLogs)
+  const [logs, setLogs] = useState<LogEntry[]>([])
   const [isPaused, setIsPaused] = useState(false)
   const [filter, setFilter] = useState<string>('')
   const [levelFilter, setLevelFilter] = useState<string>('all')
+  const [connected, setConnected] = useState(false)
   const logsEndRef = useRef<HTMLDivElement>(null)
+  const isPausedRef = useRef(isPaused)
+  useEffect(() => { isPausedRef.current = isPaused }, [isPaused])
 
-  // Simulate real-time log updates
+  // SSE 长连接
   useEffect(() => {
-    if (isPaused) return
+    const token = localStorage.getItem('access_token')
+    if (!token) return
 
-    const interval = setInterval(() => {
-      const messages = [
-        { level: 'info' as const, message: '检查任务状态...' },
-        { level: 'success' as const, message: '健康检查通过' },
-        { level: 'info' as const, message: '同步智能体状态' },
-        { level: 'warn' as const, message: `内存使用率: ${Math.floor(Math.random() * 20) + 60}%` },
-        { level: 'info' as const, message: '处理任务队列中的任务' },
-      ]
-      const randomMsg = messages[Math.floor(Math.random() * messages.length)]
-      const now = new Date()
-      const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`
+    const es = new EventSource(`${SSE_URL}?token=${encodeURIComponent(token)}`)
 
-      const newLog: LogEntry = {
-        id: Date.now(),
-        time,
-        ...randomMsg,
+    es.onopen = () => setConnected(true)
+
+    es.onmessage = (e) => {
+      if (isPausedRef.current) return
+      try {
+        const raw = JSON.parse(e.data) as {
+          time: string
+          level: BackendLevel
+          message: string
+          target: string
+        }
+        const entry: LogEntry = {
+          id: Date.now() + Math.random(),
+          time: raw.time,
+          level: mapLevel(raw.level),
+          message: raw.target ? `[${raw.target}] ${raw.message}` : raw.message,
+        }
+        setLogs(prev => [...prev.slice(-499), entry])
+      } catch {
+        // ignore malformed frames
       }
+    }
 
-      setLogs(prev => [...prev.slice(-99), newLog])
-    }, 3000)
+    es.onerror = () => {
+      setConnected(false)
+      es.close()
+    }
 
-    return () => clearInterval(interval)
-  }, [isPaused])
+    return () => {
+      es.close()
+      setConnected(false)
+    }
+  }, [])
 
   // Auto-scroll
   useEffect(() => {
@@ -143,8 +158,8 @@ export default function LogsPage() {
       <div className="bg-slate-900 rounded-xl overflow-hidden">
         <div className="p-4 border-b border-slate-700 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-            <span className="text-sm text-slate-400">实时日志流</span>
+            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+            <span className="text-sm text-slate-400">{connected ? '实时日志流' : '未连接'}</span>
           </div>
           <span className="text-sm text-slate-400">{filteredLogs.length} 条日志</span>
         </div>
