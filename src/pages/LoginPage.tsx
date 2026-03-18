@@ -9,6 +9,16 @@ export default function LoginPage() {
   const { showSuccess, showError } = useToast()
   const [isLogin, setIsLogin] = useState(true)
 
+  const getFriendlyErrorMessage = (err: unknown, fallback: string) => {
+    if (err instanceof TypeError && err.message.toLowerCase().includes('failed to fetch')) {
+      return '无法连接到服务器，请检查后端服务是否启动或网络是否可用'
+    }
+    if (err instanceof Error) {
+      return err.message || fallback
+    }
+    return fallback
+  }
+
   // Login state
   const [username, setUsername] = useState('banchen')
   const [password, setPassword] = useState('12345678')
@@ -38,10 +48,16 @@ export default function LoginPage() {
 
     try {
       const response = await authService.login(username, password)
-      const data = await response.json()
+      const raw = await response.text()
+      let data: any = {}
+      try {
+        data = raw ? JSON.parse(raw) : {}
+      } catch {
+        data = { message: raw }
+      }
 
       if (!response.ok) {
-        throw new Error(data.message || '登录失败')
+        throw new Error(data.message || data.error || '登录失败')
       }
 
       const authData = data
@@ -58,7 +74,7 @@ export default function LoginPage() {
 
       navigate('/dashboard')
     } catch (err) {
-      showError(err instanceof Error ? err.message : '登录失败，请检查网络连接')
+      showError(getFriendlyErrorMessage(err, '登录失败，请检查网络连接'))
     } finally {
       setLoading(false)
     }
@@ -87,10 +103,16 @@ export default function LoginPage() {
 
     try {
       const response = await authService.register(registerUsername, registerEmail, registerPassword)
-      const data = await response.json()
+      const raw = await response.text()
+      let data: any = {}
+      try {
+        data = raw ? JSON.parse(raw) : {}
+      } catch {
+        data = { message: raw }
+      }
 
       if (!response.ok) {
-        throw new Error(data.message || '注册失败')
+        throw new Error(data.message || data.error || '注册失败')
       }
 
       showSuccess('注册成功，请登录')
@@ -104,7 +126,7 @@ export default function LoginPage() {
         setPassword(registerPassword)
       }, 1000)
     } catch (err) {
-      showError(err instanceof Error ? err.message : '注册失败，请检查网络连接')
+      showError(getFriendlyErrorMessage(err, '注册失败，请检查网络连接'))
     } finally {
       setLoading(false)
     }

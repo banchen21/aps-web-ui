@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:8000'
+const API_BASE_URL = 'http://localhost:8000/api/v1'
 
 export interface MemoryNode {
   id: string
@@ -53,7 +53,7 @@ export const memoryService = {
     })
     const result = await response.json()
     if (!response.ok) throw new Error(result.message || '获取记忆节点失败')
-    return result.data as MemoryNode[]
+    return result as MemoryNode[]
   },
 
   // 获取单个记忆节点
@@ -63,7 +63,7 @@ export const memoryService = {
     })
     const result = await response.json()
     if (!response.ok) throw new Error(result.message || '获取记忆节点失败')
-    return result.data as MemoryNode
+    return result as MemoryNode
   },
 
   // 创建记忆节点
@@ -75,7 +75,7 @@ export const memoryService = {
     })
     const result = await response.json()
     if (!response.ok) throw new Error(result.message || '创建记忆节点失败')
-    return result.data as MemoryNode
+    return result as MemoryNode
   },
 
   // 更新记忆节点
@@ -87,7 +87,7 @@ export const memoryService = {
     })
     const result = await response.json()
     if (!response.ok) throw new Error(result.message || '更新记忆节点失败')
-    return result.data as MemoryNode
+    return result as MemoryNode
   },
 
   // 删除记忆节点
@@ -98,7 +98,7 @@ export const memoryService = {
     })
     const result = await response.json()
     if (!response.ok) throw new Error(result.message || '删除记忆节点失败')
-    return result.data
+    return result
   },
 
   // 获取节点关系
@@ -108,7 +108,7 @@ export const memoryService = {
     })
     const result = await response.json()
     if (!response.ok) throw new Error(result.message || '获取关系失败')
-    return result.data as MemoryRelationship[]
+    return result as MemoryRelationship[]
   },
 
   // 创建关系
@@ -120,7 +120,7 @@ export const memoryService = {
     })
     const result = await response.json()
     if (!response.ok) throw new Error(result.message || '创建关系失败')
-    return result.data as MemoryRelationship
+    return result as MemoryRelationship
   },
 
   // 删除关系
@@ -131,7 +131,7 @@ export const memoryService = {
     })
     const result = await response.json()
     if (!response.ok) throw new Error(result.message || '删除关系失败')
-    return result.data
+    return result
   },
 
   // 搜索记忆节点
@@ -141,6 +141,6 @@ export const memoryService = {
     })
     const result = await response.json()
     if (!response.ok) throw new Error(result.message || '搜索失败')
-    return result.data as MemoryNode[]
+    return result as MemoryNode[]
   },
 }

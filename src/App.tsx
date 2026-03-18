@@ -56,7 +56,17 @@ function AppLayout() {
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [darkMode, setDarkMode] = useState(false)
-  const { messages, removeMessage } = useToast()
+
+  const currentUsername = (() => {
+    try {
+      const raw = localStorage.getItem('aps_user')
+      if (!raw) return '用户'
+      const parsed = JSON.parse(raw)
+      return parsed?.username || '用户'
+    } catch {
+      return '用户'
+    }
+  })()
 
   // Check auth and setup token refresh
   const token = localStorage.getItem('access_token')
@@ -158,8 +168,8 @@ function AppLayout() {
             </h1>
             <div className="flex items-center gap-4">
               <div className="text-right">
-                <div className="text-sm font-medium text-slate-900 dark:text-white">Admin</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400">Admin</div>
+                <div className="text-sm font-medium text-slate-900 dark:text-white">{currentUsername}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">当前用户</div>
               </div>
             </div>
           </header>
@@ -182,21 +192,28 @@ function AppLayout() {
         </div>
       </div>
 
-      {/* Toast notifications */}
-      <Toast messages={messages} onRemove={removeMessage} />
     </div>
+  )
+}
+
+function AppRouter() {
+  const { messages, removeMessage } = useToast()
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/*" element={<AppLayout />} />
+      </Routes>
+      <Toast messages={messages} onRemove={removeMessage} />
+    </BrowserRouter>
   )
 }
 
 function App() {
   return (
     <ToastProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/*" element={<AppLayout />} />
-        </Routes>
-      </BrowserRouter>
+      <AppRouter />
     </ToastProvider>
   )
 }

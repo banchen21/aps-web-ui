@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Plus, Trash2, Edit2, Link2, Search } from 'lucide-react'
 import { memoryService, MemoryNode, MemoryRelationship } from '../services/memory'
 import { useToast } from '../contexts/ToastContext'
@@ -24,14 +24,31 @@ export default function MemoryPage() {
   })
 
   useEffect(() => {
-    fetchNodes()
+    void fetchGraphData()
   }, [])
 
-  const fetchNodes = async () => {
+  const fetchGraphData = async (query?: string) => {
     try {
       setLoading(true)
-      const data = await memoryService.getNodes()
+      const data = query?.trim()
+        ? await memoryService.searchNodes(query)
+        : await memoryService.getNodes()
       setNodes(data)
+
+      const relArrays = await Promise.all(
+        data.map(async (node) => {
+          try {
+            return await memoryService.getRelationships(node.id)
+          } catch {
+            return [] as MemoryRelationship[]
+          }
+        }),
+      )
+      const dedup = new Map<string, MemoryRelationship>()
+      relArrays.flat().forEach((r) => dedup.set(r.id, r))
+      setRelationships(Array.from(dedup.values()))
+
+      setSelectedNode((prev) => (prev ? data.find((n) => n.id === prev.id) || null : null))
     } catch (err) {
       showError(err instanceof Error ? err.message : '获取记忆节点失败')
     } finally {
@@ -40,30 +57,11 @@ export default function MemoryPage() {
   }
 
   const handleSearch = async () => {
-    if (!searchQuery.trim()) {
-      fetchNodes()
-      return
-    }
-
-    try {
-      setLoading(true)
-      const data = await memoryService.searchNodes(searchQuery)
-      setNodes(data)
-    } catch (err) {
-      showError(err instanceof Error ? err.message : '搜索失败')
-    } finally {
-      setLoading(false)
-    }
+    await fetchGraphData(searchQuery)
   }
 
-  const handleSelectNode = async (node: MemoryNode) => {
-    try {
-      setSelectedNode(node)
-      const rels = await memoryService.getRelationships(node.id)
-      setRelationships(rels)
-    } catch (err) {
-      showError(err instanceof Error ? err.message : '获取关系失败')
-    }
+  const handleSelectNode = (node: MemoryNode) => {
+    setSelectedNode(node)
   }
 
   const handleCreateNode = async (e: React.FormEvent) => {
@@ -80,6 +78,7 @@ export default function MemoryPage() {
         type: nodeForm.type,
       })
       setNodes([...nodes, node])
+      setSelectedNode(node)
       setNodeForm({ name: '', description: '', type: 'concept' })
       setShowNodeModal(false)
       showSuccess('记忆节点创建成功')
@@ -120,10 +119,8 @@ export default function MemoryPage() {
     try {
       await memoryService.deleteNode(nodeId)
       setNodes(nodes.filter((n) => n.id !== nodeId))
-      if (selectedNode?.id === nodeId) {
-        setSelectedNode(null)
-        setRelationships([])
-      }
+      setRelationships(relationships.filter((r) => r.source_id !== nodeId && r.target_id !== nodeId))
+      if (selectedNode?.id === nodeId) setSelectedNode(null)
       showSuccess('记忆节点删除成功')
     } catch (err) {
       showError(err instanceof Error ? err.message : '删除失败')
@@ -174,11 +171,50 @@ export default function MemoryPage() {
     setShowNodeModal(true)
   }
 
+  const nodeMap = useMemo(() => {
+    const m = new Map<string, MemoryNode>()
+    nodes.forEach((n) => m.set(n.id, n))
+    return m
+  }, [nodes])
+
+  const nodePositions = useMemo(() => {
+    const map = new Map<string, { x: number; y: number }>()
+    const cols = Math.max(1, Math.ceil(Math.sqrt(nodes.length || 1)))
+    const gapX = 200
+    const gapY = 150
+    const startX = 120
+    const startY = 100
+
+    nodes.forEach((n, i) => {
+      const col = i % cols
+      const row = Math.floor(i / cols)
+      map.set(n.id, {
+        x: startX + col * gapX,
+        y: startY + row * gapY,
+      })
+    })
+    return map
+  }, [nodes])
+
+  const canvasHeight = useMemo(() => {
+    const cols = Math.max(1, Math.ceil(Math.sqrt(nodes.length || 1)))
+    const rows = Math.max(1, Math.ceil((nodes.length || 1) / cols))
+    return Math.max(420, rows * 150 + 140)
+  }, [nodes])
+
+  const selectedRelationships = useMemo(
+    () =>
+      selectedNode
+        ? relationships.filter((r) => r.source_id === selectedNode.id)
+        : [],
+    [relationships, selectedNode],
+  )
+
   return (
-    <div className="grid grid-cols-3 gap-6 h-full">
-      {/* 节点列表 */}
-      <div className="col-span-1 bg-white dark:bg-slate-800 rounded-lg shadow p-6 flex flex-col">
-        <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">记忆节点</h2>
+    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 h-full">
+      {/* 左侧：搜索与节点操作 */}
+      <div className="xl:col-span-3 bg-white dark:bg-slate-800 rounded-lg shadow p-6 flex flex-col">
+        <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">记忆图谱</h2>
 
         <div className="flex gap-2 mb-4">
           <input
@@ -186,11 +222,11 @@ export default function MemoryPage() {
             placeholder="搜索节点..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+            onKeyDown={(e) => e.key === 'Enter' && void handleSearch()}
             className="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <button
-            onClick={handleSearch}
+            onClick={() => void handleSearch()}
             className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
           >
             <Search size={18} />
@@ -207,6 +243,13 @@ export default function MemoryPage() {
         >
           <Plus size={18} />
           新建节点
+        </button>
+
+        <button
+          onClick={() => void fetchGraphData()}
+          className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition mb-4"
+        >
+          刷新图谱
         </button>
 
         <div className="flex-1 overflow-y-auto space-y-2">
@@ -233,8 +276,78 @@ export default function MemoryPage() {
         </div>
       </div>
 
-      {/* 节点详情 */}
-      <div className="col-span-2 bg-white dark:bg-slate-800 rounded-lg shadow p-6 flex flex-col">
+      {/* 中间：图谱画布 */}
+      <div className="xl:col-span-6 bg-white dark:bg-slate-800 rounded-lg shadow p-4">
+        <div className="text-sm text-slate-500 dark:text-slate-400 mb-3">
+          图像操作：点击节点选中，边表示关系，数据来自后端 Neo4j
+        </div>
+        <div className="relative overflow-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40">
+          {loading ? (
+            <div className="h-[420px] flex items-center justify-center text-slate-500">加载图谱中...</div>
+          ) : nodes.length === 0 ? (
+            <div className="h-[420px] flex items-center justify-center text-slate-500">暂无节点</div>
+          ) : (
+            <div className="relative min-w-[900px]" style={{ height: `${canvasHeight}px` }}>
+              <svg className="absolute inset-0 w-full h-full pointer-events-none">
+                {relationships.map((rel) => {
+                  const from = nodePositions.get(rel.source_id)
+                  const to = nodePositions.get(rel.target_id)
+                  if (!from || !to) return null
+                  return (
+                    <g key={rel.id}>
+                      <line
+                        x1={from.x}
+                        y1={from.y}
+                        x2={to.x}
+                        y2={to.y}
+                        stroke="#64748b"
+                        strokeWidth={1.5}
+                        strokeOpacity={0.7}
+                      />
+                      <text
+                        x={(from.x + to.x) / 2}
+                        y={(from.y + to.y) / 2 - 6}
+                        fontSize="11"
+                        fill="#475569"
+                        textAnchor="middle"
+                      >
+                        {rel.relationship_type}
+                      </text>
+                    </g>
+                  )
+                })}
+              </svg>
+
+              {nodes.map((node) => {
+                const pos = nodePositions.get(node.id)
+                if (!pos) return null
+                const selected = selectedNode?.id === node.id
+                return (
+                  <button
+                    key={node.id}
+                    onClick={() => handleSelectNode(node)}
+                    className={`absolute w-36 px-3 py-2 rounded-xl text-left shadow border transition ${
+                      selected
+                        ? 'bg-blue-600 text-white border-blue-700'
+                        : 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border-slate-200 dark:border-slate-600 hover:shadow-md'
+                    }`}
+                    style={{ left: pos.x, top: pos.y, transform: 'translate(-50%, -50%)' }}
+                    title={node.description || node.name}
+                  >
+                    <div className="text-sm font-semibold truncate">{node.name}</div>
+                    <div className={`text-xs truncate ${selected ? 'text-blue-100' : 'text-slate-500 dark:text-slate-400'}`}>
+                      {node.type}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 右侧：节点详情 */}
+      <div className="xl:col-span-3 bg-white dark:bg-slate-800 rounded-lg shadow p-6 flex flex-col">
         {selectedNode ? (
           <>
             <div className="flex items-start justify-between mb-6">
@@ -280,7 +393,7 @@ export default function MemoryPage() {
                 {relationships.length === 0 ? (
                   <div className="text-center text-slate-500 py-8">暂无关系</div>
                 ) : (
-                  relationships.map((rel) => (
+                  selectedRelationships.map((rel) => (
                     <div
                       key={rel.id}
                       className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-700 rounded-lg"
@@ -288,7 +401,7 @@ export default function MemoryPage() {
                       <div>
                         <div className="font-medium text-slate-900 dark:text-white">{rel.relationship_type}</div>
                         <div className="text-sm text-slate-500 dark:text-slate-400">
-                          目标: {rel.target_id}
+                          目标: {nodeMap.get(rel.target_id)?.name || rel.target_id}
                         </div>
                       </div>
                       <button
@@ -305,7 +418,7 @@ export default function MemoryPage() {
           </>
         ) : (
           <div className="flex items-center justify-center h-full text-slate-500">
-            选择一个节点查看详情
+            在图谱中选择一个节点查看详情
           </div>
         )}
       </div>

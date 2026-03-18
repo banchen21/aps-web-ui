@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Plus, Search, Filter, MoreVertical, CheckCircle, Clock, XCircle, Loader, Eye } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Plus, Search, Filter, MoreVertical, CheckCircle, Clock, XCircle, Loader, Eye, Wifi, WifiOff } from 'lucide-react'
 import { taskService, TaskItem, TaskStatusGroup } from '../services/task'
 import { useToast } from '../contexts/ToastContext'
+import { WS_CHAT_URL, WsServerMessage } from '../services/chat'
 
 const statusConfig = {
   completed: { label: '已完成', class: 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-400', icon: CheckCircle },
@@ -24,18 +25,24 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<TaskItem[]>([])
   const [loading, setLoading] = useState(true)
   const [isAutoRefreshing, setIsAutoRefreshing] = useState(false)
+  const [wsConnected, setWsConnected] = useState(false)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null)
   const [isDetailLoading, setIsDetailLoading] = useState(false)
   const [isDecisionSubmitting, setIsDecisionSubmitting] = useState(false)
   const [isDeletingTask, setIsDeletingTask] = useState(false)
+  const wsRef = useRef<WebSocket | null>(null)
+  const reconnectAttemptsRef = useRef(0)
+  const doConnectRef = useRef<(() => void) | null>(null)
+  const knownTaskIdsRef = useRef<Set<string>>(new Set())
+  const initializedTaskSetRef = useRef(false)
   const [createForm, setCreateForm] = useState({
     name: '',
     description: '',
     priority: 'medium' as 'low' | 'medium' | 'high' | 'critical',
   })
 
-  const fetchTasks = useCallback(async (silent = false) => {
+  const fetchTasks = useCallback(async (silent = false, notifyNewTask = true) => {
     try {
       if (silent) {
         setIsAutoRefreshing(true)
@@ -43,6 +50,25 @@ export default function TasksPage() {
         setLoading(true)
       }
       const data = await taskService.getTasks()
+
+      const incomingIds = new Set(data.map((item) => item.id))
+      if (!initializedTaskSetRef.current) {
+        knownTaskIdsRef.current = incomingIds
+        initializedTaskSetRef.current = true
+      } else if (notifyNewTask) {
+        const newlyCreated = data.filter((item) => !knownTaskIdsRef.current.has(item.id))
+        if (newlyCreated.length > 0) {
+          if (newlyCreated.length === 1) {
+            showSuccess(`检测到后端新建任务：${newlyCreated[0].name}`)
+          } else {
+            showSuccess(`检测到后端新建任务 ${newlyCreated.length} 条`)
+          }
+        }
+        knownTaskIdsRef.current = incomingIds
+      } else {
+        knownTaskIdsRef.current = incomingIds
+      }
+
       setTasks(data)
       setSelectedTask((prev) => {
         if (!prev) return null
@@ -64,10 +90,55 @@ export default function TasksPage() {
         setLoading(false)
       }
     }
-  }, [showError])
+  }, [showError, showSuccess])
 
   useEffect(() => {
     void fetchTasks()
+  }, [fetchTasks])
+
+  useEffect(() => {
+    doConnectRef.current = () => {
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+
+      const ws = new WebSocket(`${WS_CHAT_URL}?token=${encodeURIComponent(token)}`)
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        setWsConnected(true)
+        reconnectAttemptsRef.current = 0
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const msg: WsServerMessage = JSON.parse(event.data)
+          if (msg.type === 'task_progress') {
+            void fetchTasks(true)
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+
+      ws.onerror = () => {
+        setWsConnected(false)
+      }
+
+      ws.onclose = () => {
+        setWsConnected(false)
+        if (reconnectAttemptsRef.current < 5) {
+          reconnectAttemptsRef.current += 1
+          setTimeout(() => doConnectRef.current?.(), 3000)
+        }
+      }
+    }
+
+    doConnectRef.current()
+
+    return () => {
+      reconnectAttemptsRef.current = 99
+      wsRef.current?.close()
+    }
   }, [fetchTasks])
 
   useEffect(() => {
@@ -102,7 +173,7 @@ export default function TasksPage() {
       showSuccess('任务创建成功')
       setShowCreateModal(false)
       setCreateForm({ name: '', description: '', priority: 'medium' })
-      await fetchTasks(true)
+      await fetchTasks(true, false)
     } catch (err) {
       showError(err instanceof Error ? err.message : '创建任务失败')
     }
@@ -197,6 +268,19 @@ export default function TasksPage() {
           <p className="text-slate-500 dark:text-slate-400 mt-1">查看和管理所有任务</p>
         </div>
         <div className="flex items-center gap-3">
+          <div className="text-xs flex items-center gap-1.5">
+            {wsConnected ? (
+              <>
+                <Wifi className="w-3.5 h-3.5 text-emerald-500" />
+                <span className="text-emerald-600 dark:text-emerald-400">实时在线</span>
+              </>
+            ) : (
+              <>
+                <WifiOff className="w-3.5 h-3.5 text-amber-500" />
+                <span className="text-amber-600 dark:text-amber-400">实时重连中</span>
+              </>
+            )}
+          </div>
           <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
             <Loader className={`w-3.5 h-3.5 ${isAutoRefreshing ? 'animate-spin text-violet-500' : ''}`} />
             {isAutoRefreshing ? '自动同步中...' : '每 5 秒自动刷新'}
