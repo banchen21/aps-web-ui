@@ -1,38 +1,193 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts'
-import { Activity, Bot, CheckCircle, Cpu, TrendingUp, TrendingDown, Clock, HardDrive, Network, Boxes, Zap } from 'lucide-react'
+import { Activity, Bot, CheckCircle, Cpu, TrendingUp, TrendingDown, Clock, HardDrive, Boxes, Zap } from 'lucide-react'
 import { systemService, SystemInfo } from '../services/system'
 import { agentService, ProviderModelOption } from '../services/agent'
+import { taskService, TaskItem } from '../services/task'
 import { useToast } from '../contexts/ToastContext'
 
-const taskData = [
-  { name: '10:00', completed: 45, new: 38 },
-  { name: '11:00', completed: 62, new: 55 },
-  { name: '12:00', completed: 34, new: 28 },
-  { name: '13:00', completed: 71, new: 65 },
-  { name: '14:00', completed: 55, new: 48 },
-  { name: '15:00', completed: 68, new: 62 },
-  { name: '16:00', completed: 42, new: 35 },
-]
+type TrendPeriod = 'hour' | 'day' | 'week'
 
+interface TaskTrendPoint {
+  name: string
+  completed: number
+  new: number
+}
 
-const activities = [
-  { id: 1, type: 'success', title: '任务 #2341 已完成', time: '2 分钟前', icon: CheckCircle },
-  { id: 2, type: 'info', title: '新智能体已上线', time: '15 分钟前', icon: Bot },
-  { id: 3, type: 'warning', title: '系统负载较高', time: '32 分钟前', icon: Activity },
-  { id: 4, type: 'success', title: '数据库备份完成', time: '1 小时前', icon: Zap },
-]
+interface DashboardActivity {
+  id: string
+  type: 'success' | 'warning' | 'info'
+  title: string
+  time: string
+  icon: typeof CheckCircle
+}
 
-const stats = [
-  { label: '在线智能体', value: '24', trend: '+12%', trendUp: true, icon: Bot, color: 'bg-blue-500' },
-  { label: '活跃任务', value: '156', trend: '+8%', trendUp: true, icon: Activity, color: 'bg-green-500' },
-  { label: '系统可用性', value: '99.8%', trend: '稳定', trendUp: true, icon: CheckCircle, color: 'bg-purple-500' },
-  { label: 'CPU 使用率', value: '42%', trend: '-3%', trendUp: false, icon: Cpu, color: 'bg-orange-500' },
-]
+const completedStatuses = new Set(['completed_success', 'completed_failure'])
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+const getStartOfDay = (date: Date) => {
+  const d = new Date(date)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+const getStartOfWeek = (date: Date) => {
+  const d = getStartOfDay(date)
+  const day = d.getDay() || 7
+  d.setDate(d.getDate() - day + 1)
+  return d
+}
+
+const formatRelativeTime = (isoTime?: string) => {
+  if (!isoTime) return '刚刚'
+  const time = new Date(isoTime)
+  const diffMs = Date.now() - time.getTime()
+  if (Number.isNaN(diffMs)) return '刚刚'
+
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return '刚刚'
+  if (diffMin < 60) return `${diffMin} 分钟前`
+
+  const diffHour = Math.floor(diffMin / 60)
+  if (diffHour < 24) return `${diffHour} 小时前`
+
+  const diffDay = Math.floor(diffHour / 24)
+  return `${diffDay} 天前`
+}
+
+const buildTrendData = (tasks: TaskItem[], period: TrendPeriod): TaskTrendPoint[] => {
+  const now = new Date()
+  const buckets: Array<{ key: string; label: string; start: Date; end: Date }> = []
+
+  if (period === 'hour') {
+    for (let i = 6; i >= 0; i -= 1) {
+      const start = new Date(now)
+      start.setMinutes(0, 0, 0)
+      start.setHours(start.getHours() - i)
+      const end = new Date(start)
+      end.setHours(end.getHours() + 1)
+      const key = `${start.getFullYear()}-${pad2(start.getMonth() + 1)}-${pad2(start.getDate())}-${pad2(start.getHours())}`
+      buckets.push({ key, label: `${pad2(start.getHours())}:00`, start, end })
+    }
+  } else if (period === 'day') {
+    for (let i = 6; i >= 0; i -= 1) {
+      const start = getStartOfDay(now)
+      start.setDate(start.getDate() - i)
+      const end = new Date(start)
+      end.setDate(end.getDate() + 1)
+      const key = `${start.getFullYear()}-${pad2(start.getMonth() + 1)}-${pad2(start.getDate())}`
+      buckets.push({ key, label: `${pad2(start.getMonth() + 1)}-${pad2(start.getDate())}`, start, end })
+    }
+  } else {
+    for (let i = 6; i >= 0; i -= 1) {
+      const start = getStartOfWeek(now)
+      start.setDate(start.getDate() - i * 7)
+      const end = new Date(start)
+      end.setDate(end.getDate() + 7)
+      const key = `${start.getFullYear()}-${pad2(start.getMonth() + 1)}-${pad2(start.getDate())}`
+      buckets.push({ key, label: `${pad2(start.getMonth() + 1)}-${pad2(start.getDate())}`, start, end })
+    }
+  }
+
+  const resultMap = new Map<string, TaskTrendPoint>()
+  buckets.forEach((b) => resultMap.set(b.key, { name: b.label, completed: 0, new: 0 }))
+
+  const hitBucket = (time?: string) => {
+    if (!time) return undefined
+    const t = new Date(time)
+    if (Number.isNaN(t.getTime())) return undefined
+    return buckets.find((b) => t >= b.start && t < b.end)
+  }
+
+  tasks.forEach((task) => {
+    const createdBucket = hitBucket(task.created_at)
+    if (createdBucket) {
+      const target = resultMap.get(createdBucket.key)
+      if (target) target.new += 1
+    }
+
+    if (completedStatuses.has(task.status)) {
+      const completedBucket = hitBucket(task.updated_at)
+      if (completedBucket) {
+        const target = resultMap.get(completedBucket.key)
+        if (target) target.completed += 1
+      }
+    }
+  })
+
+  return buckets.map((b) => resultMap.get(b.key) || { name: b.label, completed: 0, new: 0 })
+}
+
+const buildRecentActivities = (tasks: TaskItem[]): DashboardActivity[] => {
+  const sorted = [...tasks].sort((a, b) => {
+    const ta = new Date(a.updated_at).getTime()
+    const tb = new Date(b.updated_at).getTime()
+    return tb - ta
+  })
+
+  const recent = sorted.slice(0, 5)
+  if (recent.length === 0) {
+    return [
+      {
+        id: 'empty-0',
+        type: 'info',
+        title: '暂无任务活动记录',
+        time: '刚刚',
+        icon: Clock,
+      },
+    ]
+  }
+
+  return recent.map((task) => {
+    if (task.status === 'completed_success') {
+      return {
+        id: task.id,
+        type: 'success',
+        title: `任务 ${task.name} 已完成`,
+        time: formatRelativeTime(task.updated_at),
+        icon: CheckCircle,
+      }
+    }
+
+    if (task.status === 'completed_failure') {
+      return {
+        id: task.id,
+        type: 'warning',
+        title: `任务 ${task.name} 执行失败`,
+        time: formatRelativeTime(task.updated_at),
+        icon: Activity,
+      }
+    }
+
+    if (task.status === 'under_review') {
+      return {
+        id: task.id,
+        type: 'warning',
+        title: `任务 ${task.name} 待审阅`,
+        time: formatRelativeTime(task.updated_at),
+        icon: Clock,
+      }
+    }
+
+    return {
+      id: task.id,
+      type: 'info',
+      title: `任务 ${task.name} 状态：${task.status_label}`,
+      time: formatRelativeTime(task.updated_at),
+      icon: Zap,
+    }
+  })
+}
 
 export default function DashboardPage() {
   const { showError, showSuccess } = useToast()
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
+  const [dashboardTasks, setDashboardTasks] = useState<TaskItem[]>([])
+  const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('hour')
+  const [agentCount, setAgentCount] = useState(0)
+  const [activeTaskCount, setActiveTaskCount] = useState(0)
+  const [taskSuccessRate, setTaskSuccessRate] = useState(100)
   const [loading, setLoading] = useState(true)
   const [defaultProvider, setDefaultProvider] = useState('default')
   const [defaultModel, setDefaultModel] = useState('')
@@ -125,17 +280,96 @@ export default function DashboardPage() {
     }
   }
 
+  useEffect(() => {
+    const fetchSummary = async () => {
+      try {
+        const [agents, tasks] = await Promise.all([
+          agentService.getAgents(),
+          taskService.getTasks(),
+        ])
+
+        setAgentCount(Array.isArray(agents) ? agents.length : 0)
+
+        const taskList = (Array.isArray(tasks) ? tasks : []) as TaskItem[]
+        setDashboardTasks(taskList)
+        const activeTasks = taskList.filter((t) =>
+          ['published', 'accepted', 'executing', 'submitted', 'under_review'].includes(t.status),
+        )
+        setActiveTaskCount(activeTasks.length)
+
+        const done = taskList.filter((t) =>
+          t.status === 'completed_success' || t.status === 'completed_failure',
+        )
+        if (done.length === 0) {
+          setTaskSuccessRate(100)
+        } else {
+          const success = done.filter((t) => t.status === 'completed_success').length
+          setTaskSuccessRate(Math.round((success / done.length) * 1000) / 10)
+        }
+      } catch {
+        // 摘要信息失败不阻塞页面主流程
+      }
+    }
+
+    void fetchSummary()
+    const interval = setInterval(fetchSummary, 10000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const taskData = useMemo(
+    () => buildTrendData(dashboardTasks, trendPeriod),
+    [dashboardTasks, trendPeriod],
+  )
+
+  const activities = useMemo(
+    () => buildRecentActivities(dashboardTasks),
+    [dashboardTasks],
+  )
+
   // 计算百分比
   const cpuPercent = systemInfo ? Math.round(systemInfo.cpu_usage) : 0
   const memoryPercent = systemInfo ? Math.round((systemInfo.used_memory / systemInfo.total_memory) * 100) : 0
   const diskPercent = systemInfo ? Math.round((systemInfo.disk_usage / systemInfo.total_disk) * 100) : 0
-  const networkPercent = systemInfo ? Math.min(Math.round((systemInfo.net_rx_speed + systemInfo.net_tx_speed) / 1024 / 1024), 100) : 0
 
   const performanceData = [
     { name: 'CPU', value: cpuPercent, icon: Cpu },
     { name: '内存', value: memoryPercent, icon: HardDrive },
     { name: '磁盘', value: diskPercent, icon: HardDrive },
-    { name: '网络', value: networkPercent, icon: Network },
+  ]
+
+  const stats = [
+    {
+      label: '智能体总数',
+      value: String(agentCount),
+      trend: agentCount > 0 ? '在线' : '暂无',
+      trendUp: agentCount > 0,
+      icon: Bot,
+      color: 'bg-blue-500',
+    },
+    {
+      label: '活跃任务',
+      value: String(activeTaskCount),
+      trend: activeTaskCount > 0 ? '进行中' : '空闲',
+      trendUp: activeTaskCount > 0,
+      icon: Activity,
+      color: 'bg-green-500',
+    },
+    {
+      label: '任务成功率',
+      value: `${taskSuccessRate}%`,
+      trend: '近期开单统计',
+      trendUp: taskSuccessRate >= 80,
+      icon: CheckCircle,
+      color: 'bg-purple-500',
+    },
+    {
+      label: 'CPU 使用率',
+      value: `${cpuPercent}%`,
+      trend: cpuPercent <= 70 ? '健康' : '偏高',
+      trendUp: cpuPercent <= 70,
+      icon: Cpu,
+      color: 'bg-orange-500',
+    },
   ]
 
   return (
@@ -189,16 +423,21 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-semibold text-slate-900 dark:text-white">任务趋势</h3>
             <div className="flex gap-2">
-              {['小时', '天', '周'].map((period, i) => (
+              {([
+                { id: 'hour', label: '小时' },
+                { id: 'day', label: '天' },
+                { id: 'week', label: '周' },
+              ] as Array<{ id: TrendPeriod; label: string }>).map((period) => (
                 <button
-                  key={period}
+                  key={period.id}
+                  onClick={() => setTrendPeriod(period.id)}
                   className={`px-3 py-1 text-sm rounded-lg transition-colors ${
-                    i === 0
+                    trendPeriod === period.id
                       ? 'bg-violet-100 text-violet-600 dark:bg-violet-900 dark:text-violet-400'
                       : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700'
                   }`}
                 >
-                  {period}
+                  {period.label}
                 </button>
               ))}
             </div>
@@ -250,7 +489,7 @@ export default function DashboardPage() {
       {/* Performance Overview */}
       <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
         <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-6">性能概览</h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {performanceData.map((item, index) => (
             <div key={index}>
               <div className="flex items-center justify-between mb-2">
@@ -262,8 +501,7 @@ export default function DashboardPage() {
                   className={`h-full rounded-full transition-all duration-500 ${
                     index === 0 ? 'bg-gradient-to-r from-blue-500 to-violet-500' :
                     index === 1 ? 'bg-gradient-to-r from-green-500 to-emerald-500' :
-                    index === 2 ? 'bg-gradient-to-r from-yellow-500 to-orange-500' :
-                    'bg-gradient-to-r from-purple-500 to-pink-500'
+                    'bg-gradient-to-r from-yellow-500 to-orange-500'
                   }`}
                   style={{ width: `${item.value}%` }}
                 />

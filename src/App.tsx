@@ -9,6 +9,7 @@ import {
   Activity,
   Terminal,
   BookOpen,
+  Wrench,
   Sun,
   Moon,
   Menu,
@@ -30,6 +31,7 @@ import LogsPage from './pages/LogsPage'
 import APIDocsPage from './pages/APIDocsPage'
 import ChatPage from './pages/ChatPage'
 import MemoryPage from './pages/MemoryPage'
+import McpToolsPage from './pages/McpToolsPage'
 
 // Import auth service
 import { authService } from './services/auth'
@@ -47,6 +49,7 @@ const navItems = [
   { path: '/tasks', label: '任务管理', icon: ListTodo },
   { path: '/workspaces', label: '工作空间', icon: FolderKanban },
   { path: '/memory', label: '记忆库', icon: Brain },
+  { path: '/mcp-tools', label: 'MCP 工具', icon: Wrench },
   { path: '/logs', label: '日志控制台', icon: Terminal },
   { path: '/api-docs', label: 'API 文档', icon: BookOpen },
 ]
@@ -184,6 +187,7 @@ function AppLayout() {
               <Route path="/tasks" element={<TasksPage />} />
               <Route path="/workspaces" element={<WorkspacesPage />} />
               <Route path="/memory" element={<MemoryPage />} />
+              <Route path="/mcp-tools" element={<McpToolsPage />} />
               <Route path="/logs" element={<LogsPage />} />
               <Route path="/api-docs" element={<APIDocsPage />} />
               <Route path="/" element={<Navigate to="/chat" replace />} />

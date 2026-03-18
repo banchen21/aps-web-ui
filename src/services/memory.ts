@@ -56,16 +56,6 @@ export const memoryService = {
     return result as MemoryNode[]
   },
 
-  // 获取单个记忆节点
-  getNode: async (nodeId: string) => {
-    const response = await fetch(`${API_BASE_URL}/memory/nodes/${nodeId}`, {
-      headers: getAuthHeader(),
-    })
-    const result = await response.json()
-    if (!response.ok) throw new Error(result.message || '获取记忆节点失败')
-    return result as MemoryNode
-  },
-
   // 创建记忆节点
   createNode: async (request: CreateMemoryNodeRequest) => {
     const response = await fetch(`${API_BASE_URL}/memory/nodes`, {
